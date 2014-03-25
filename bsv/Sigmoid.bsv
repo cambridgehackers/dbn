@@ -68,7 +68,7 @@ module mkSigmoidServer#(SigmoidTable#(tsz) sigmoidTable)(Server#(Float,Float))
    Int#(usz) numEntries = 1<<fromInteger(tsz);
    // linear approximation around in range [-8,8]
 
-   Bool verbose = False;
+   Bool verbose = True;
    FIFOF#(Float) angleFifo2 <- mkFIFOF();
    FIFOF#(Float) angleFifo <- mkFIFOF();
    let multiplier <- mkFloatMultiplier();
@@ -93,7 +93,7 @@ module mkSigmoidServer#(SigmoidTable#(tsz) sigmoidTable)(Server#(Float,Float))
       if (i < -numEntries/2)
 	 index = 0;
       if (verbose)
-	 $display("sigmoid angle=%h i=%d index=%d numEntries=%d", pack(angle), i, index, numEntries);
+	 $display("sigmoid lookupEntry angle=%h i=%d index=%d numEntries=%d", pack(angle), i, index, numEntries);
       sigmoidTable.ports[0].request.put(BRAMRequest{ write: False, responseOnWrite: False, address: index, datain: ?});
    endrule
 
@@ -102,21 +102,19 @@ module mkSigmoidServer#(SigmoidTable#(tsz) sigmoidTable)(Server#(Float,Float))
       let vs <- sigmoidTable.ports[0].response.get();
       let angle = angleFifo.first();
       angleFifo.deq();
-      if (verbose) $display("angle=%h vs[0]=%h", pack(angle), pack(vs[0]));
+      if (verbose) $display("computeDelta angle=%h vs[0]=%h", pack(angle), pack(vs[0]));
       adder.request.put(tuple3(angle, vs[0], defaultValue));
       vFifo.enq(vs);
    endrule
 
    rule interpolate;
-      // delta = angle + vs[0]
-      // return vs[1] + vs[2]*delta
       let vs = vFifo.first();
       vFifo.deq();
       let result <- adder.response.get();
       let delta = tpl_1(result);
       Exception e = tpl_2(result);
       if (pack(e) != 0) $display("interpolate.exception e=%h delta=%h", e, pack(delta));
-      if (verbose) $display("delta=%h vs[1]=%h vs[2]", pack(delta), pack(vs[1]), pack(vs[2]));
+      if (verbose) $display("sigmoid interpolate delta=%h vs[1]=%h vs[2]", pack(delta), pack(vs[1]), pack(vs[2]));
       mac.request.put(tuple4(tagged Valid vs[1], vs[2], delta, defaultValue));
    endrule
 
@@ -170,6 +168,7 @@ interface DmaSigmoidIfc#(numeric type dsz);
 endinterface
 
 module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
+			      VectorSource#(dmasz, Vector#(n,Float)) tableSource,
 			      function Module#(DmaVectorSink#(dsz, Vector#(n, Float))) mkSink(PipeOut#(Vector#(n, Float)) pipe_in)
    )
    (DmaSigmoidIfc#(dsz))
@@ -193,9 +192,10 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
 
    FIFOF#(Bool) sigmoidUpdatedFifo <- mkFIFOF();
 
-   PipeOut#(Vector#(4, Float)) sigmoidSourceFunnel <- mkUnfunnel(source.pipe);
+   PipeOut#(Vector#(4, Float)) sigmoidSourceFunnel <- mkUnfunnel(tableSource.pipe);
    rule updateSigmoidTableRule if (updatingSigmoidTable);
       let vs = sigmoidSourceFunnel.first;
+      $display("updateSigmaTableRule vs[0]=%h", vs[0]);
       sigmoidSourceFunnel.deq();
       Vector#(3,Float) vs3 = take(vs);
 
@@ -210,14 +210,18 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
       entryNumber <= entryNumber + 1;
    endrule
 
+   Reg#(Bit#(32)) countInput <- mkReg(0);
    rule consumeInput if (!updatingSigmoidTable);
       let vs = source.pipe.first;
       source.pipe.deq();
       for (Integer i = 0; i < valueOf(n); i = i + 1) begin
          sigmoidServers[i].request.put(vs[i]);
       end
+      $display("consumeInput countInput=%d vs[0]=%h", countInput+1, vs[0]);
+      countInput <= countInput + 1;
    endrule
 
+   Reg#(Bit#(32)) count <- mkReg(0);
    FIFOF#(Vector#(n, Float)) dfifo <- mkFIFOF();
    rule enqResult;
       Vector#(n, Float) vs;
@@ -225,6 +229,8 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
          let v <- sigmoidServers[i].response.get();
 	 vs[i] = v;
       end
+      $display("sigmoid count=%d value=%h", count+1, vs);
+      count <= count + 1;
       dfifo.enq(vs);
    endrule
 
@@ -233,7 +239,7 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
    method Action start(DmaPointer pointerA, DmaPointer pointerB, UInt#(DmaOffsetSize) count);
       source.start(pointerA, 0, pack(count));
       sinkC.vector.start(pointerB, 0, pack(count));
-      //$display("sigmoid.start numElts=%d", numElts);
+      $display("sigmoid.start count=%d", count);
    endmethod
    method Action setSigmoidLimits(Float rscale, Float llimit, Float ulimit);
       for (Integer i = 0; i < valueOf(n); i = i + 1) begin
@@ -244,7 +250,7 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
       entryNumber <= 0;
       numElts <= extend(count);
       updatingSigmoidTable <= True;
-      source.start(readPointer, extend(readOffset), 4*extend(count));
+      tableSource.start(readPointer, extend(readOffset), 4*extend(count));
    endmethod
    method Bit#(32) tableSize();
       return sigmoidTables[0].tableSize();

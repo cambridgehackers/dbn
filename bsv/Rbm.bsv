@@ -397,7 +397,7 @@ endmodule
 
 interface Rbm#(numeric type n);
    interface RbmRequest request;
-   interface Vector#(11, DmaReadClient#(TMul#(32,n))) readClients;
+   interface Vector#(12, DmaReadClient#(TMul#(32,n))) readClients;
    interface Vector#(5, DmaWriteClient#(TMul#(32,n))) writeClients;
 endinterface
 
@@ -412,8 +412,9 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
    DramMatrixMultiply#(N, TMul#(N,32)) dmaMMF <- mkDramMatrixMultiply();
    //DramBramMatrixMultiply#(N, TMul#(N,32)) bramMMF <- mkDramBramMatrixMultiply();
 
-   Vector#(1, DmaVectorSource#(DmaSz, Vector#(N,Float))) sigmoidsources <- replicateM(mkDmaVectorSource());
+   Vector#(2, DmaVectorSource#(DmaSz, Vector#(N,Float))) sigmoidsources <- replicateM(mkDmaVectorSource());
    DmaSigmoidIfc#(TMul#(32,n)) dmaSigmoid <- mkDmaSigmoid(sigmoidsources[0].vector,
+							  sigmoidsources[1].vector,
 							  mkDmaVectorSink);
 
    DmaStatesPipe#(N, DmaSz) dmaStates <- mkDmaStatesPipe();
