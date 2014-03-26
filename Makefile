@@ -19,3 +19,4 @@ datasets:
 	wget -P datasets http://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz
 	wget -P datasets http://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz
 	wget -P datasets http://yann.lecun.com/exdb/mnist/t10k-labels-idx1-ubyte.gz
+	cd datasets; gunzip *.gz
