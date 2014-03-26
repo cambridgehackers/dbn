@@ -106,7 +106,7 @@ module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
    let abytes = asz / 8;
    let burstLen = 1;
 
-   Bool verbose = False;
+   Bool verbose = True;
 
    FIFOF#(Bool) rfifo <- mkFIFOF();
    Reg#(DmaPointer) pointer <- mkReg(0);
@@ -126,17 +126,22 @@ module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
 	 method ActionValue#(DmaData#(asz)) get();
 	    let v = pipe_in.first;
 	    pipe_in.deq;
-	    if (verbose) $display("DmaVectorSink.writeBack offset=%h v=%h", offset, v);
+	    if (verbose) $display("DmaVectorSink.writeData offset=%h v=%h", offset, v);
+
+	    let da = doneoffset + fromInteger(abytes);
+	    $display("DmaVectorSink writeDone da=%d limit=%d", da, limit);
+	    if (da >= limit) rfifo.enq(?);
+	    doneoffset <= da;
+
 	    return DmaData { data: pack(v), tag: 0 };
 	 endmethod
       endinterface : writeData
       interface Put writeDone;
 	 method Action put(Bit#(6) tag);
-	    //$display("DmaVectorSink writeDone tag=%h", tag);
-	    let da = doneoffset + fromInteger(abytes)*burstLen;
-	    if (da >= limit)
-	       rfifo.enq(?);
-	    doneoffset <= da;
+	    // let da = doneoffset + fromInteger(abytes)*burstLen;
+	    // $display("DmaVectorSink writeDone tag=%h da=%d limit=%d", tag, da, limit);
+	    // if (da >= limit) rfifo.enq(?);
+	    // doneoffset <= da;
 	 endmethod
       endinterface : writeDone
    endinterface : dmaClient
