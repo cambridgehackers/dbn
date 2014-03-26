@@ -37,7 +37,7 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
       Add#(1,a__,n)
       );
 
-   Bool verbose = False;
+   Bool verbose = True;
 
    PipeOut#(Tuple2#(Vector#(n,Float),Vector#(n,Float))) xypipe <- mkJoin(tuple2, xpipe, ypipe);
 
@@ -51,7 +51,7 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
       xypipe.deq;
       let x = tpl_1(v);
       let y = tpl_2(v);
-      if (verbose) $display($format(fshow("dotprod x=") + fshow(x) + fshow(" y=") + fshow(y)));
+      if (verbose) $display($format(fshow("countMulReg=")+fshow(countMulReg)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y)));
 
       for (Integer i = 0; i < valueOf(n); i = i + 1) begin
 	  Maybe#(Float) accum = tagged Invalid;
@@ -73,15 +73,19 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
 	    accumFifo[i].enq(tagged Valid tpl_1(resp));
 	 end
 	 else begin
-	    // need to fold the values together, but we're only compiling for n == 1
-	    if (i == 0)
+	    // FIXME need to fold the values together, but we're only compiling for n == 1
+	    $display("resultFifo.enq %h", tpl_1(resp));
+	    if (i == 0) begin
+	       countMulReg <= 0;
 	       resultFifo.enq(tpl_1(resp));
+	    end
 	 end
       end
-      if (verbose) $display(fshow("count=")+fshow(countMulReg)+fshow(" mul=") + fshow(vs));
+      if (verbose) $display(fshow("countMulReg=")+fshow(countMulReg)+fshow(" numElts=")+fshow(numElts)+fshow(" mul=") + fshow(vs));
    endrule
 
    PipeOut#(Float) dotpipe = toPipeOut(resultFifo);
+   return dotpipe;
 endmodule
 
 
@@ -176,7 +180,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
 
    let n = valueOf(n);
    let k = valueOf(k);
-   Bool verbose = False;
+   Bool verbose = True;
 
    Reg#(Bool) doneReg <- mkReg(False);
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorA <- mkReg(unpack(0));
@@ -199,9 +203,10 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
    Vector#(TAdd#(n,1), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) xypipes <- mkForkVector(xypipeifc.pipe);
 
    Reg#(Bool) running <- mkReg(False);
+   FIFOF#(Bool) doneFifo <- mkFIFOF();
 
    for (Integer i = 0; i < k; i = i + 1) begin
-       rule startDotProd if (dpCount > 0);
+      rule startDotProd;
 	  Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[i].first;
 	  xypipes[i].deq();
 
@@ -224,7 +229,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
        endrule
    end
 
-   rule dotProdValue if (dpCount > 0);
+   rule dotProdValue;
       Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[n].first;
       xypipes[n].deq;
       Vector#(n,Float) vs;
@@ -238,10 +243,10 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
       dfifo.enq(vs);
    endrule
 
-   FIFOF#(Bool) doneFifo <- mkFIFOF();
-   rule sinkDone if (dpCount > 0);
-      let c = dpCount-fromInteger(n);
+   rule sinkDone;
+      // each time we write a burst of k values via sinkC
       sinkC.vector.pipe.deq();
+      let c = dpCount-fromInteger(k);
       dpCount <= c;
       if (c == 0) begin
 	 running <= False;
