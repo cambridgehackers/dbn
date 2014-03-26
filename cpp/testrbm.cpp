@@ -122,7 +122,7 @@ int main(int argc, const char **argv)
     PortalMat pm1(m1);
     PortalMat pm2(m2);
     PortalMat pm3;
-    //pm3.multf(pm1, pm2);
+    pm3.multf(pm1, pm2);
     //pm3.multf(pm1, pm2);
     pm3.sigmoid(pm1);
   } else {
