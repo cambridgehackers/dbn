@@ -43,45 +43,52 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
 
    Vector#(n, Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac);
    Vector#(n, FIFO#(Maybe#(Float))) accumFifo <- replicateM(mkFIFO());
-   Reg#(UInt#(nwidth)) countMulReg <- mkReg(0);
+   Reg#(UInt#(nwidth)) countInReg <- mkReg(0);
+   Reg#(UInt#(nwidth)) countOutReg <- mkReg(0);
    FIFOF#(Float) resultFifo <- mkFIFOF();
 
-   rule mul if (countMulReg < numElts);
+   rule mul;
       let v = xypipe.first;
       xypipe.deq;
       let x = tpl_1(v);
       let y = tpl_2(v);
-      if (verbose) $display($format(fshow("countMulReg=")+fshow(countMulReg)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y)));
 
       for (Integer i = 0; i < valueOf(n); i = i + 1) begin
-	  Maybe#(Float) accum = tagged Invalid;
-	  if (countMulReg > 0) begin
-	     accum = accumFifo[i].first();
-	     accumFifo[i].deq();
-	  end
+	 Maybe#(Float) accum = tagged Invalid;
+	 if (countInReg > 0) begin
+	    accum = accumFifo[i].first();
+	    accumFifo[i].deq();
+	 end
+	 if (verbose) $display($format(fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y) + fshow(" accum=")+fshow(pack(accum))));
          macs[i].request.put(tuple4(accum, x[i], y[i], defaultValue));
+	 let c = countInReg + 1;
+	 if (c == numElts)
+	    c = 0;
+	 countInReg <= c;
       end
-      countMulReg <= countMulReg + 1;
    endrule
 
    rule macout;
       Vector#(n,Float) vs;
+      let c = countOutReg + 1;
       for (Integer i = 0; i < valueOf(n); i = i + 1) begin
 	 let resp <- macs[i].response.get();
 	 vs[i] = tpl_1(resp);
-	 if (countMulReg < numElts) begin
+	 if (c < numElts) begin
 	    accumFifo[i].enq(tagged Valid tpl_1(resp));
 	 end
 	 else begin
 	    // FIXME need to fold the values together, but we're only compiling for n == 1
 	    $display("resultFifo.enq %h", tpl_1(resp));
 	    if (i == 0) begin
-	       countMulReg <= 0;
 	       resultFifo.enq(tpl_1(resp));
 	    end
 	 end
       end
-      if (verbose) $display(fshow("countMulReg=")+fshow(countMulReg)+fshow(" numElts=")+fshow(numElts)+fshow(" mul=") + fshow(vs));
+      if (c == numElts)
+	 c = 0;
+      countOutReg <= c;
+      if (verbose) $display(fshow("countOutReg=")+fshow(countOutReg)+fshow(" numElts=")+fshow(numElts)+fshow(" mul=") + fshow(vs));
    endrule
 
    PipeOut#(Float) dotpipe = toPipeOut(resultFifo);
