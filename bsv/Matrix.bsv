@@ -155,7 +155,7 @@ module mkXYRangePipeOut(XYRangePipeIfc#(a)) provisos (Arith#(a), Bits#(a,awidth)
 endmodule: mkXYRangePipeOut
 
 typedef struct {
-   DmaPointer pointer;
+   ObjectPointer pointer;
    addrtype base;
    addrtype numRows;
    addrtype numColumns;
@@ -163,10 +163,10 @@ typedef struct {
 
 // row major layout
 interface DmaMatrixMultiplyIfc#(numeric type addrwidth, numeric type dsz);
-   interface DmaWriteClient#(dsz) dmaClient;
-   method Action start(DmaPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
-		       DmaPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
-		       DmaPointer pointerC);
+   interface ObjectWriteClient#(dsz) dmaClient;
+   method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
+		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
+		       ObjectPointer pointerC);
    interface PipeOut#(Bool) pipe;
 endinterface
 
@@ -178,7 +178,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
 				     Vector#(k, VectorSource#(dsz, Vector#(1, Float))) sourceB,
 				     function Module#(DmaVectorSink#(dsz, Vector#(1, Float))) mkSink(PipeOut#(Vector#(1, Float)) pipe_in)
 				     )(DmaMatrixMultiplyIfc#(addrwidth, dsz))
-   provisos (Add#(a__,DmaOffsetSize,addrwidth)
+   provisos (Add#(a__,ObjectOffsetSize,addrwidth)
 	     , Add#(1,0,n)
 	     , Add#(1,c__,k)
 	     , FShow#(Float)
@@ -261,9 +261,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
       end
    endrule
 
-   method Action start(DmaPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
-		       DmaPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
-		       DmaPointer pointerC) if (dpCount == 0);
+   method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
+		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
+		       ObjectPointer pointerC) if (dpCount == 0);
       XYRangeConfig#(UInt#(addrwidth)) xycfg = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: 1,
 							      ybase: 0, ylimit: numRowsB, ystep: fromInteger(n) };
       descriptorA <= MatrixDescriptor { pointer: pointerA, base: 0, numRows: numRowsA, numColumns: numColumnsA};
@@ -277,6 +277,6 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
       xypipeifc.start(xycfg);
    endmethod
 
-   interface DmaWriteClient dmaClient = sinkC.dmaClient;
+   interface ObjectWriteClient dmaClient = sinkC.dmaClient;
    interface PipeOut pipe = toPipeOut(doneFifo);
 endmodule

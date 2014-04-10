@@ -11,7 +11,7 @@ import CtrlMux::*;
 import Portal::*;
 import Leds::*;
 import PortalMemory::*;
-import AxiDma::*;
+import MemServer::*;
 import PortalMemory::*;
 import Dma::*;
 import DmaUtils::*;
@@ -51,12 +51,12 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty))
       endfunction
       let buffers <- mapM(mkBuffer, rbm.readClients);
 
-      function Module#(Empty) connect(Tuple2#(DmaReadBuffer#(dsz, burstlen), DmaReadClient#(dsz)) tpl);
+      function Module#(Empty) connect(Tuple2#(DmaReadBuffer#(dsz, burstlen), ObjectReadClient#(dsz)) tpl);
 	 return mkConnection(tpl_2(tpl), tpl_1(tpl).dmaServer);
       endfunction
       let connections <- mapM(connect, zip(buffers, rbm.readClients));
 
-      function DmaReadClient#(dsz) dmaClient(DmaReadBuffer#(dsz, burstlen) b);
+      function ObjectReadClient#(dsz) dmaClient(DmaReadBuffer#(dsz, burstlen) b);
 	 return b.dmaClient;
       endfunction
       readClients = map(dmaClient, buffers);
@@ -72,12 +72,12 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty))
       endfunction
       let buffers <- mapM(mkBuffer, rbm.writeClients);
 
-      function Module#(Empty) connect(Tuple2#(DmaWriteBuffer#(dsz, burstlen), DmaWriteClient#(dsz)) tpl);
+      function Module#(Empty) connect(Tuple2#(DmaWriteBuffer#(dsz, burstlen), ObjectWriteClient#(dsz)) tpl);
 	 return mkConnection(tpl_2(tpl), tpl_1(tpl).dmaServer);
       endfunction
       let connections <- mapM(connect, zip(buffers, rbm.writeClients));
 
-      function DmaWriteClient#(dsz) dmaClient(DmaWriteBuffer#(dsz, burstlen) b);
+      function ObjectWriteClient#(dsz) dmaClient(DmaWriteBuffer#(dsz, burstlen) b);
 	 return b.dmaClient;
       endfunction
       writeClients = map(dmaClient, buffers);
@@ -86,7 +86,7 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty))
       writeClients = rbm.writeClients;
    end
 
-   AxiDmaServer#(addrWidth, TMul#(32,N)) dma <- mkAxiDmaServer(dmaIndicationProxy.ifc, readClients, writeClients);
+   MemServer#(addrWidth, TMul#(32,N)) dma <- mkMemServer(dmaIndicationProxy.ifc, readClients, writeClients);
 
    DmaConfigWrapper dmaConfigWrapper <- mkDmaConfigWrapper(DmaConfig,dma.request);
 
@@ -99,10 +99,10 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty))
    StdDirectory dir <- mkStdDirectory(portals);
    
    // when constructing ctrl and interrupt muxes, directories must be the first argument
-   let ctrl_mux <- mkAxiSlaveMux(dir,portals);
+   let ctrl_mux <- mkSlaveMux(dir,portals);
    
    interface interrupt = getInterruptVector(portals);
-   interface StdAxi3Slave ctrl = ctrl_mux;
-   interface Axi3Master m_axi = dma.m_axi;
+   interface slave = ctrl_mux;
+   interface master = dma.master;
 
 endmodule : mkPortalTop

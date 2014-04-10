@@ -158,11 +158,11 @@ module [Module] mkSigmoid#(SigmoidTable#(tsz) sigmoidTable, PipeOut#(Float) in)(
 endmodule
 
 interface DmaSigmoidIfc#(numeric type dsz);
-   method Action start(DmaPointer pointerA, DmaPointer pointerB, UInt#(DmaOffsetSize) numElts);
+   method Action start(ObjectPointer pointerA, ObjectPointer pointerB, UInt#(ObjectOffsetSize) numElts);
    method Action setSigmoidLimits(Float rscale, Float llimit, Float ulimit);
    method Action updateSigmoidTable(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) numElts);
    method Bit#(32) tableSize();
-   interface DmaWriteClient#(dsz) dmaClient;
+   interface ObjectWriteClient#(dsz) dmaClient;
    interface PipeOut#(Bool) pipe;
    interface PipeOut#(Bool) sigmoidTablePipe;
 endinterface
@@ -187,7 +187,7 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
    end
 
    Reg#(Bool) updatingSigmoidTable <- mkReg(False);
-   Reg#(Bit#(DmaOffsetSize)) numElts <- mkReg(0);
+   Reg#(Bit#(ObjectOffsetSize)) numElts <- mkReg(0);
    Reg#(Bit#(6)) entryNumber <- mkReg(0);
 
    FIFOF#(Bool) sigmoidUpdatedFifo <- mkFIFOF();
@@ -236,7 +236,7 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
 
    let sinkC <- mkSink(toPipeOut(dfifo));
 
-   method Action start(DmaPointer pointerA, DmaPointer pointerB, UInt#(DmaOffsetSize) count);
+   method Action start(ObjectPointer pointerA, ObjectPointer pointerB, UInt#(ObjectOffsetSize) count);
       source.start(pointerA, 0, pack(count));
       sinkC.vector.start(pointerB, 0, pack(count));
       $display("sigmoid.start count=%d", count);
@@ -256,7 +256,7 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
       return sigmoidTables[0].tableSize();
    endmethod
 
-   interface DmaWriteClient dmaClient = sinkC.dmaClient;
+   interface ObjectWriteClient dmaClient = sinkC.dmaClient;
    interface PipeOut pipe = sinkC.vector.pipe;
    interface PipeOut sigmoidTablePipe = toPipeOut(sigmoidUpdatedFifo);
 

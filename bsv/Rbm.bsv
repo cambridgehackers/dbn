@@ -93,16 +93,16 @@ interface RbmRequest;
     method Action finish(); // for bsim only
 endinterface
 
-function DmaReadClient#(asz) getSourceReadClient(DmaVectorSource#(asz,a) s); return s.dmaClient; endfunction
-function DmaWriteClient#(asz) getSinkWriteClient(DmaVectorSink#(asz,a) s); return s.dmaClient; endfunction
+function ObjectReadClient#(asz) getSourceReadClient(DmaVectorSource#(asz,a) s); return s.dmaClient; endfunction
+function ObjectWriteClient#(asz) getSinkWriteClient(DmaVectorSink#(asz,a) s); return s.dmaClient; endfunction
 
 interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
-   interface Vector#(2, DmaReadClient#(dmasz)) readClients;
-   interface Vector#(1, DmaWriteClient#(dmasz)) writeClients;
+   interface Vector#(2, ObjectReadClient#(dmasz)) readClients;
+   interface Vector#(1, ObjectWriteClient#(dmasz)) writeClients;
    interface PipeOut#(Bool) donePipe;
-   method Action start(DmaPointer pointerA, UInt#(DmaOffsetSize) numRowsA, UInt#(DmaOffsetSize) numColumnsA,
-		       DmaPointer pointerB, UInt#(DmaOffsetSize) numRowsB, UInt#(DmaOffsetSize) numColumnsB,
-		       DmaPointer pointerC);
+   method Action start(ObjectPointer pointerA, UInt#(ObjectOffsetSize) numRowsA, UInt#(ObjectOffsetSize) numColumnsA,
+		       ObjectPointer pointerB, UInt#(ObjectOffsetSize) numRowsB, UInt#(ObjectOffsetSize) numColumnsB,
+		       ObjectPointer pointerC);
    method Bit#(32) dbg();
 endinterface
 
@@ -111,7 +111,7 @@ module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
    Vector#(2, DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
    Vector#(1, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = cons(vfsources[0].vector, nil);
    Vector#(1, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = cons(vfsources[1].vector, nil);
-   DmaMatrixMultiplyIfc#(DmaOffsetSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
+   DmaMatrixMultiplyIfc#(ObjectOffsetSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
    interface Vector readClients = map(getSourceReadClient, vfsources);
    interface Vector writeClients = cons(dmaMMF.dmaClient, nil);
    interface PipeOut donePipe = dmaMMF.pipe;
@@ -125,12 +125,12 @@ module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
 endmodule
 
 interface DramBramMatrixMultiply#(numeric type n, numeric type dmasz);
-   interface Vector#(2, DmaReadClient#(dmasz)) readClients;
-   interface Vector#(2, DmaWriteClient#(dmasz)) writeClients;
+   interface Vector#(2, ObjectReadClient#(dmasz)) readClients;
+   interface Vector#(2, ObjectWriteClient#(dmasz)) writeClients;
    interface PipeOut#(Bool) donePipe;
-   method Action start(DmaPointer pointerA, UInt#(DmaOffsetSize) numRowsA, UInt#(DmaOffsetSize) numColumnsA,
-		       DmaPointer pointerB, UInt#(DmaOffsetSize) numRowsB, UInt#(DmaOffsetSize) numColumnsB,
-		       DmaPointer pointerC);
+   method Action start(ObjectPointer pointerA, UInt#(ObjectOffsetSize) numRowsA, UInt#(ObjectOffsetSize) numColumnsA,
+		       ObjectPointer pointerB, UInt#(ObjectOffsetSize) numRowsB, UInt#(ObjectOffsetSize) numColumnsB,
+		       ObjectPointer pointerC);
    method Action toBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts);
    method ActionValue#(Bit#(32)) toBramDone();
    method Action fromBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts);
@@ -153,7 +153,7 @@ module [Module] mkDramBramMatrixMultiply(DramBramMatrixMultiply#(N,TMul#(N,32)))
    FIFOF#(Vector#(N,Float)) wbfifo <- mkFIFOF();
    DmaVectorSink#(DmaSz, Vector#(N,Float)) writeBackVectorSink <- mkDmaVectorSink(toPipeOut(wbfifo));
 
-   DmaMatrixMultiplyIfc#(DmaOffsetSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, cons(bramVectorSource.vector, nil), mkDmaVectorSink);
+   DmaMatrixMultiplyIfc#(ObjectOffsetSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, cons(bramVectorSource.vector, nil), mkDmaVectorSink);
 
    Reg#(Bit#(14)) bramWriteOffset <- mkReg(0);
    Reg#(Bit#(14)) bramWriteLimit <- mkReg(0);
@@ -259,8 +259,8 @@ module [Module] mkDmaStatesPipe2(DmaStatesPipe2#(N, DmaSz))
 endmodule
 
 interface DmaUpdateWeights#(numeric type n, numeric type dmasz);
-   interface Vector#(3, DmaReadClient#(dmasz)) readClients;
-   interface Vector#(1, DmaWriteClient#(dmasz)) writeClients;
+   interface Vector#(3, ObjectReadClient#(dmasz)) readClients;
+   interface Vector#(1, ObjectWriteClient#(dmasz)) writeClients;
    interface PipeOut#(Bool) donePipe;
    method Action start(Bit#(32) posAssociationsPointer, Bit#(32) negAssociationsPointer, Bit#(32) weightsPointer, Bit#(32) numElts, Float learningRateOverNumExamples);
 endinterface
@@ -327,7 +327,7 @@ module [Module] mkDmaUpdateWeights(DmaUpdateWeights#(N, DmaSz))
    endmethod
 endmodule
 interface DmaSumOfErrorSquared#(numeric type n, numeric type dmasz);
-   interface Vector#(2, DmaReadClient#(dmasz)) readClients;
+   interface Vector#(2, ObjectReadClient#(dmasz)) readClients;
    interface PipeOut#(Float) pipe;
    method Action start(Bit#(32) dataPointer, Bit#(32) predPointer, Bit#(32) numElts);
 endinterface
@@ -399,6 +399,7 @@ interface Rbm#(numeric type n);
    interface RbmRequest request;
    interface Vector#(12, DmaReadClient#(TMul#(32,n))) readClients;
    interface Vector#(5, DmaWriteClient#(TMul#(32,n))) writeClients;
+interface changes
 endinterface
 
 module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
