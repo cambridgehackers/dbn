@@ -31,58 +31,47 @@ import Pipe::*;
 
 interface VectorSource#(numeric type dsz, type a);
    interface PipeOut#(a) pipe;
-   method Action start(DmaPointer h, Bit#(DmaOffsetSize) a, Bit#(DmaOffsetSize) l);
+   method Action start(ObjectPointer h, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
 endinterface
 
 interface DmaVectorSource#(numeric type dsz, type a);
-   interface DmaReadClient#(dsz) dmaClient;
+   interface ObjectReadClient#(dsz) dmaClient;
    interface VectorSource#(dsz, a) vector;
 endinterface
 
+function ObjectReadClient#(asz) getSourceReadClient(DmaVectorSource#(asz,a) s); return s.dmaClient; endfunction
+function ObjectWriteClient#(asz) getSinkWriteClient(DmaVectorSink#(asz,a) s); return s.dmaClient; endfunction
 function VectorSource#(dsz, dtype) dmaVectorSourceVector(DmaVectorSource#(dsz,dtype) dmavs); return dmavs.vector; endfunction
 
 module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
-   provisos (  Bits#(a,asz)
+   provisos (Bits#(a,asz),
+	     Div#(asz,8,abytes),
+	     Log#(abytes,ashift),
+	     Mul#(abytes, 8, asz)
 	     );
 
-   Bool verbose = False;
+   Bool verbose = True;
 
    let asz = valueOf(asz);
-   let abytes = asz / 8;
+   let abytes = valueOf(abytes);
+   let ashift = valueOf(ashift);
    let burstLen = 1;
 
-   FIFOF#(a) dfifo <- mkFIFOF();
-   Reg#(DmaPointer) pointer <- mkReg(0);
-   Reg#(Bit#(DmaOffsetSize)) offset <- mkReg(0);
-   Reg#(Bit#(DmaOffsetSize)) limit <- mkReg(0);
+   FIFOF#(Bit#(asz)) dfifo <- mkFIFOF();
+   MemreadEngine#(asz) memreadEngine <- mkMemreadEngine(2, dfifo);
 
-   interface DmaReadClient dmaClient;
-      interface Get readReq;
-	 method ActionValue#(DmaRequest) get() if (offset < limit);
-	    if (verbose) $display("DmaVectorSource.readReq h=%d offset=%h limit=%h len=%d", pointer, offset, limit, burstLen);
-	    offset <= offset + fromInteger(abytes)*burstLen;
-	    return DmaRequest { pointer: pointer, offset: offset, burstLen: burstLen, tag: 0 };
-	 endmethod
-      endinterface : readReq
-      interface Put readData;
-	 method Action put(DmaData#(asz) dmadata);
-	    let v  = dmadata.data;
-	    if (verbose) $display("DmaVectorSource.readData pointer=%d dmaval=%h", pointer, v);
-	    dfifo.enq(unpack(v));
-	 endmethod
-      endinterface : readData
-   endinterface : dmaClient
+   interface ObjectReadClient dmaClient = memreadEngine.dmaClient;
    interface VectorSource vector;
-       method Action start(DmaPointer h, Bit#(DmaOffsetSize) a, Bit#(DmaOffsetSize) l) if (offset >= limit);
-	  if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h", h, a, l);
-	  pointer <= h;
-	  offset <= a*fromInteger(abytes);
-	  limit <= l*fromInteger(abytes);
+       method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
+	  if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
+          memreadEngine.start(p, a, truncate(l << ashift), 8);
        endmethod
        interface PipeOut pipe;
-	  method first = dfifo.first;
+	  method first();
+	     return unpack(dfifo.first());
+	  endmethod
 	  method Action deq();
-	     if (verbose) $display("DmaReadClient pipe.deq() pointer=%d data=%h", pointer, dfifo.first);
+	     if (verbose) $display("ObjectReadClient pipe.deq() data=%h", dfifo.first);
 	     dfifo.deq;
 	  endmethod
 	  method notEmpty = dfifo.notEmpty;
@@ -92,10 +81,10 @@ endmodule
 
 interface VectorSink#(numeric type dsz, type a);
    interface PipeOut#(Bool) pipe;
-   method Action start(DmaPointer h, Bit#(DmaOffsetSize) a, Bit#(DmaOffsetSize) l);
+   method Action start(ObjectPointer h, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
 endinterface
 interface DmaVectorSink#(numeric type dsz, type a);
-   interface DmaWriteClient#(dsz) dmaClient;
+   interface ObjectWriteClient#(dsz) dmaClient;
    interface VectorSink#(dsz, a) vector;
 endinterface
 
@@ -106,48 +95,43 @@ module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
    let abytes = asz / 8;
    let burstLen = 1;
 
-   Bool verbose = True;
+   Bool verbose = False;
 
    FIFOF#(Bool) rfifo <- mkFIFOF();
-   Reg#(DmaPointer) pointer <- mkReg(0);
-   Reg#(Bit#(DmaOffsetSize)) offset <- mkReg(0);
-   Reg#(Bit#(DmaOffsetSize)) doneoffset <- mkReg(0);
-   Reg#(Bit#(DmaOffsetSize)) limit <- mkReg(0);
+   Reg#(ObjectPointer) pointer <- mkReg(0);
+   Reg#(Bit#(ObjectOffsetSize)) offset <- mkReg(0);
+   Reg#(Bit#(ObjectOffsetSize)) doneoffset <- mkReg(0);
+   Reg#(Bit#(ObjectOffsetSize)) limit <- mkReg(0);
 
-   interface DmaWriteClient dmaClient;
+   interface ObjectWriteClient dmaClient;
       interface Get writeReq;
-	  method ActionValue#(DmaRequest) get if (offset < limit && pipe_in.notEmpty());
+	  method ActionValue#(ObjectRequest) get if (offset < limit && pipe_in.notEmpty());
 	     if (verbose) $display("DmaVectorSink writeReq h=%d offset=%h burstlen=%d pipein.notEmpty=%d rfifo.notFull=%d", pointer, offset, burstLen, pipe_in.notEmpty(), rfifo.notFull());
 	     offset <= offset + fromInteger(abytes)*burstLen;
-	     return DmaRequest { pointer: pointer, offset: offset, burstLen: burstLen, tag: 0 };
+	     return ObjectRequest { pointer: pointer, offset: offset, burstLen: burstLen, tag: 0 };
 	  endmethod
       endinterface : writeReq
       interface Get writeData;
-	 method ActionValue#(DmaData#(asz)) get();
+	 method ActionValue#(ObjectData#(asz)) get();
 	    let v = pipe_in.first;
 	    pipe_in.deq;
-	    if (verbose) $display("DmaVectorSink.writeData offset=%h v=%h", offset, v);
-
-	    let da = doneoffset + fromInteger(abytes);
-	    $display("DmaVectorSink writeDone da=%d limit=%d", da, limit);
-	    if (da >= limit) rfifo.enq(?);
-	    doneoffset <= da;
-
-	    return DmaData { data: pack(v), tag: 0 };
+	    if (verbose) $display("DmaVectorSink.writeBack offset=%h v=%h", offset, v);
+	    return ObjectData { data: pack(v), tag: 0 };
 	 endmethod
       endinterface : writeData
       interface Put writeDone;
 	 method Action put(Bit#(6) tag);
-	    // let da = doneoffset + fromInteger(abytes)*burstLen;
-	    // $display("DmaVectorSink writeDone tag=%h da=%d limit=%d", tag, da, limit);
-	    // if (da >= limit) rfifo.enq(?);
-	    // doneoffset <= da;
+	    //$display("DmaVectorSink writeDone tag=%h", tag);
+	    let da = doneoffset + fromInteger(abytes)*burstLen;
+	    if (da >= limit)
+	       rfifo.enq(?);
+	    doneoffset <= da;
 	 endmethod
       endinterface : writeDone
    endinterface : dmaClient
 
    interface VectorSink vector;
-       method Action start(DmaPointer h, Bit#(DmaOffsetSize) a, Bit#(DmaOffsetSize) l) if (doneoffset >= limit);
+       method Action start(ObjectPointer h, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l) if (doneoffset >= limit);
 	  pointer <= h;
 	  offset <= a*fromInteger(abytes);
 	  doneoffset <= a*fromInteger(abytes);
@@ -165,7 +149,7 @@ endinterface
 
 module [Module] mkBramVectorSource(BramVectorSource#(addrsz, dsz, dtype))
    provisos (Bits#(dtype,dsz),
-	     Add#(a__, addrsz, DmaOffsetSize)
+	     Add#(a__, addrsz, ObjectOffsetSize)
 	     );
 
    Bool verbose = False;
@@ -192,7 +176,7 @@ module [Module] mkBramVectorSource(BramVectorSource#(addrsz, dsz, dtype))
       endinterface
    endinterface : bramClient
    interface VectorSource vector;
-       method Action start(DmaPointer pointer, Bit#(DmaOffsetSize) a, Bit#(DmaOffsetSize) l) if (offset >= limit);
+       method Action start(ObjectPointer pointer, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l) if (offset >= limit);
 	  if (verbose) $display("BramVectorSource.start a=%h l=%h", a, l);
 	  offset <= truncate(a);
 	  limit <= truncate(l);
