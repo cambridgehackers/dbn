@@ -25,6 +25,7 @@ import FIFOF::*;
 import PortalMemory::*;
 import Dma::*;
 import MemreadEngine::*;
+import MemwriteEngine::*;
 import Adapter::*;
 import BRAM::*;
 import Pipe::*;
@@ -94,54 +95,37 @@ interface DmaVectorSink#(numeric type dsz, type a);
 endinterface
 
 module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
-   provisos (Bits#(a,asz));
+   provisos (Bits#(a,asz),
+	     Div#(asz,8,abytes),
+	     Log#(abytes,ashift),
+	     Mul#(abytes,8,asz));
 
    let asz = valueOf(asz);
-   let abytes = asz / 8;
+   let abytes = valueOf(abytes);
+   let ashift = valueOf(ashift);
    let burstLen = 1;
 
    Bool verbose = False;
 
-   FIFOF#(Bool) rfifo <- mkFIFOF();
-   Reg#(ObjectPointer) pointer <- mkReg(0);
-   Reg#(Bit#(ObjectOffsetSize)) offset <- mkReg(0);
-   Reg#(Bit#(ObjectOffsetSize)) doneoffset <- mkReg(0);
-   Reg#(Bit#(ObjectOffsetSize)) limit <- mkReg(0);
+   FIFOF#(Bit#(asz)) fifo_in = (interface FIFOF;
+				    method Bit#(asz) first(); return pack(pipe_in.first()); endmethod
+				    method Bool notEmpty(); return pipe_in.notEmpty(); endmethod
+				    method Action enq(Bit#(asz) v); endmethod
+				    method Bool notFull(); return False; endmethod
+				endinterface);
+   MemwriteEngine#(asz) memwriteEngine <- mkMemwriteEngine(2, fifo_in);
 
-   interface ObjectWriteClient dmaClient;
-      interface Get writeReq;
-	  method ActionValue#(ObjectRequest) get if (offset < limit && pipe_in.notEmpty());
-	     if (verbose) $display("DmaVectorSink writeReq h=%d offset=%h burstlen=%d pipein.notEmpty=%d rfifo.notFull=%d", pointer, offset, burstLen, pipe_in.notEmpty(), rfifo.notFull());
-	     offset <= offset + fromInteger(abytes)*burstLen;
-	     return ObjectRequest { pointer: pointer, offset: offset, burstLen: burstLen, tag: 0 };
-	  endmethod
-      endinterface : writeReq
-      interface Get writeData;
-	 method ActionValue#(ObjectData#(asz)) get();
-	    let v = pipe_in.first;
-	    pipe_in.deq;
-	    if (verbose) $display("DmaVectorSink.writeBack offset=%h v=%h", offset, v);
-	    return ObjectData { data: pack(v), tag: 0 };
-	 endmethod
-      endinterface : writeData
-      interface Put writeDone;
-	 method Action put(Bit#(6) tag);
-	    //$display("DmaVectorSink writeDone tag=%h", tag);
-	    let da = doneoffset + fromInteger(abytes)*burstLen;
-	    if (da >= limit)
-	       rfifo.enq(?);
-	    doneoffset <= da;
-	 endmethod
-      endinterface : writeDone
-   endinterface : dmaClient
+   FIFOF#(Bool) rfifo <- mkSizedFIFOF(8);
+   rule memwriteDoneRule;
+      let b <- memwriteEngine.finish();
+      rfifo.enq(True);
+   endrule
 
+   interface ObjectWriteClient dmaClient = memwriteEngine.dmaClient;
    interface VectorSink vector;
-       method Action start(ObjectPointer h, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l) if (doneoffset >= limit);
-	  pointer <= h;
-	  offset <= a*fromInteger(abytes);
-	  doneoffset <= a*fromInteger(abytes);
-	  limit <= l*fromInteger(abytes);
-	  if (verbose) $display("DmaVectorSink.start   h=%d offset=%h l=%h", h, a, l);
+       method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
+	  if (verbose) $display("DmaVectorSink.start   p=%d offset=%h l=%h", p, a, l);
+	  memwriteEngine.start(p, a << ashift, truncate(l << ashift), 1 << ashift);
        endmethod
        interface PipeOut pipe = toPipeOut(rfifo);
    endinterface
