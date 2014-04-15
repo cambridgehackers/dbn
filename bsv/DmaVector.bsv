@@ -32,6 +32,7 @@ import Pipe::*;
 interface VectorSource#(numeric type dsz, type a);
    interface PipeOut#(a) pipe;
    method Action start(ObjectPointer h, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
+   method ActionValue#(Bool) finish();
 endinterface
 
 interface DmaVectorSource#(numeric type dsz, type a);
@@ -57,15 +58,19 @@ module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
    let ashift = valueOf(ashift);
    let burstLen = 1;
 
-   FIFOF#(Bit#(asz)) dfifo <- mkFIFOF();
+   FIFOF#(Bit#(asz)) dfifo <- mkSizedFIFOF(8);
    MemreadEngine#(asz) memreadEngine <- mkMemreadEngine(2, dfifo);
 
    interface ObjectReadClient dmaClient = memreadEngine.dmaClient;
    interface VectorSource vector;
        method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
 	  if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
-          memreadEngine.start(p, a, truncate(l << ashift), 8);
+          memreadEngine.start(p, a << ashift, truncate(l << ashift), 1 << ashift);
        endmethod
+      method ActionValue#(Bool) finish();
+	 let b <- memreadEngine.finish();
+	 return b;
+      endmethod
        interface PipeOut pipe;
 	  method first();
 	     return unpack(dfifo.first());
