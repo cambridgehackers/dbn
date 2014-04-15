@@ -397,9 +397,8 @@ endmodule
 
 interface Rbm#(numeric type n);
    interface RbmRequest request;
-   interface Vector#(12, DmaReadClient#(TMul#(32,n))) readClients;
-   interface Vector#(5, DmaWriteClient#(TMul#(32,n))) writeClients;
-interface changes
+   interface Vector#(12, ObjectReadClient#(TMul#(32,n))) readClients;
+   interface Vector#(5, ObjectWriteClient#(TMul#(32,n))) writeClients;
 endinterface
 
 module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))

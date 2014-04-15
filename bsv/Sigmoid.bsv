@@ -236,10 +236,10 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
 
    let sinkC <- mkSink(toPipeOut(dfifo));
 
-   method Action start(ObjectPointer pointerA, ObjectPointer pointerB, UInt#(ObjectOffsetSize) count);
-      source.start(pointerA, 0, pack(count));
-      sinkC.vector.start(pointerB, 0, pack(count));
-      $display("sigmoid.start count=%d", count);
+   method Action start(ObjectPointer pointerA, ObjectPointer pointerB, UInt#(ObjectOffsetSize) numElts);
+      source.start(pointerA, 0, pack(numElts));
+      sinkC.vector.start(pointerB, 0, pack(numElts));
+      $display("sigmoid.start numElts=%d", numElts);
    endmethod
    method Action setSigmoidLimits(Float rscale, Float llimit, Float ulimit);
       for (Integer i = 0; i < valueOf(n); i = i + 1) begin
