@@ -145,6 +145,7 @@ void configureSigmoidTable(RbmRequestProxy *device, RbmIndication *indication);
 
 template<typename T>
   void dumpMat(const char *prefix, const char *fmt, const cv::Mat &mat);
+void dumpMatf(const char *prefix, const char *fmt, const cv::Mat &mat);
 
 #endif // _PORTALMAT_H_
 

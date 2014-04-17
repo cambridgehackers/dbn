@@ -368,3 +368,7 @@ void dumpMat(const char *prefix, const char *fmt, const cv::Mat &mat)
     fprintf(stderr, "\n");
   }
 }
+void dumpMatf(const char *prefix, const char *fmt, const cv::Mat &mat)
+{
+    dumpMat<float>(prefix, fmt, mat);
+}
