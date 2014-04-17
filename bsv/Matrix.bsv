@@ -234,6 +234,14 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
 	  if (i == 0)
 	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC)), pack(truncate(startC + fromInteger(k))));
        endrule
+       if (i == 0)
+	  rule finishSourceA;
+	     let b <- sourceA[0].finish();
+	  endrule
+      rule finishSourceB;
+	 let b <- sourceB[i].finish();
+      endrule
+      
    end
 
    rule dotProdValue;
@@ -252,7 +260,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
 
    rule sinkDone;
       // each time we write a burst of k values via sinkC
-      sinkC.vector.pipe.deq();
+      let b <- sinkC.vector.finish();
       let c = dpCount-fromInteger(k);
       dpCount <= c;
       if (c == 0) begin

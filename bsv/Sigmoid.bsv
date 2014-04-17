@@ -159,12 +159,12 @@ endmodule
 
 interface DmaSigmoidIfc#(numeric type dsz);
    method Action start(ObjectPointer pointerA, ObjectPointer pointerB, UInt#(ObjectOffsetSize) numElts);
+   method ActionValue#(Bool) finish();
    method Action setSigmoidLimits(Float rscale, Float llimit, Float ulimit);
    method Action updateSigmoidTable(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) numElts);
+   method ActionValue#(Bool) sigmoidTableUpdated();
    method Bit#(32) tableSize();
    interface ObjectWriteClient#(dsz) dmaClient;
-   interface PipeOut#(Bool) pipe;
-   interface PipeOut#(Bool) sigmoidTablePipe;
 endinterface
 
 module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
@@ -190,8 +190,6 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
 
    Reg#(Bool) updatingSigmoidTable <- mkReg(False);
    Reg#(Bit#(6)) entryNumber <- mkReg(0);
-
-   FIFOF#(Bool) sigmoidUpdatedFifo <- mkFIFOF();
 
    PipeOut#(Vector#(4, Float)) sigmoidSourceFunnel <- mkUnfunnel(tableSource.pipe);
    rule updateSigmoidTableRule if (updatingSigmoidTable);
@@ -232,12 +230,6 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
 
    let sinkC <- mkSink(toPipeOut(dfifo));
 
-   rule tableSourceFinishRule;
-      if (verbose) $display("tableSource.finish()");
-      let b <- tableSource.finish();
-      updatingSigmoidTable <= False;
-      sigmoidUpdatedFifo.enq(True);
-   endrule
    rule sourceFinishRule;
       let b <- source.finish();
       if (verbose) $display("sigmoid.source.finish()");
@@ -247,6 +239,10 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
       source.start(pointerA, 0, pack(numvalues));
       sinkC.vector.start(pointerB, 0, pack(numvalues));
       if (verbose) $display("sigmoid.start numvalues=%d", numvalues);
+   endmethod
+   method ActionValue#(Bool) finish();
+      let b <- sinkC.vector.finish();
+      return b;
    endmethod
    method Action setSigmoidLimits(Float rscale, Float llimit, Float ulimit);
       for (Integer i = 0; i < valueOf(n); i = i + 1) begin
@@ -258,12 +254,16 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
       updatingSigmoidTable <= True;
       tableSource.start(readPointer, extend(readOffset), 4*extend(numvalues));
    endmethod
+   method ActionValue#(Bool) sigmoidTableUpdated();
+      if (verbose) $display("tableSource.finish()");
+      let b <- tableSource.finish();
+      updatingSigmoidTable <= False;
+      return b;
+   endmethod
    method Bit#(32) tableSize();
       return sigmoidTables[0].tableSize();
    endmethod
 
    interface ObjectWriteClient dmaClient = sinkC.dmaClient;
-   interface PipeOut pipe = sinkC.vector.pipe;
-   interface PipeOut sigmoidTablePipe = toPipeOut(sigmoidUpdatedFifo);
 
 endmodule

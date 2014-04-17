@@ -86,8 +86,8 @@ module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
 endmodule
 
 interface VectorSink#(numeric type dsz, type a);
-   interface PipeOut#(Bool) pipe;
    method Action start(ObjectPointer h, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
+   method ActionValue#(Bool) finish();
 endinterface
 interface DmaVectorSink#(numeric type dsz, type a);
    interface ObjectWriteClient#(dsz) dmaClient;
@@ -108,18 +108,14 @@ module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
    Bool verbose = False;
 
    FIFOF#(Bit#(asz)) fifo_in = (interface FIFOF;
-				    method Bit#(asz) first(); return pack(pipe_in.first()); endmethod
-				    method Bool notEmpty(); return pipe_in.notEmpty(); endmethod
-				    method Action enq(Bit#(asz) v); endmethod
-				    method Bool notFull(); return False; endmethod
+				   method Bit#(asz) first(); return pack(pipe_in.first()); endmethod
+				   method Bool notEmpty(); return pipe_in.notEmpty(); endmethod
+				   method Action deq(); pipe_in.deq(); endmethod
+				   method Action enq(Bit#(asz) v); endmethod
+				   method Action clear(); endmethod
+				   method Bool notFull(); return False; endmethod
 				endinterface);
    MemwriteEngine#(asz) memwriteEngine <- mkMemwriteEngine(2, fifo_in);
-
-   FIFOF#(Bool) rfifo <- mkSizedFIFOF(8);
-   rule memwriteDoneRule;
-      let b <- memwriteEngine.finish();
-      rfifo.enq(True);
-   endrule
 
    interface ObjectWriteClient dmaClient = memwriteEngine.dmaClient;
    interface VectorSink vector;
@@ -127,7 +123,10 @@ module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
 	  if (verbose) $display("DmaVectorSink.start   p=%d offset=%h l=%h", p, a, l);
 	  memwriteEngine.start(p, a << ashift, truncate(l << ashift), 1 << ashift);
        endmethod
-       interface PipeOut pipe = toPipeOut(rfifo);
+      method ActionValue#(Bool) finish();
+	 let b <- memwriteEngine.finish();
+	 return b;
+      endmethod
    endinterface
 endmodule
 
@@ -148,6 +147,7 @@ module [Module] mkBramVectorSource(BramVectorSource#(addrsz, dsz, dtype))
    FIFOF#(dtype) dfifo <- mkFIFOF();
    Reg#(Bit#(addrsz)) offset <- mkReg(0);
    Reg#(Bit#(addrsz)) limit <- mkReg(0);
+   Reg#(Bool) busy <- mkReg(False);
 
    interface BRAMClient bramClient;
       interface Get request;
@@ -169,7 +169,12 @@ module [Module] mkBramVectorSource(BramVectorSource#(addrsz, dsz, dtype))
 	  if (verbose) $display("BramVectorSource.start a=%h l=%h", a, l);
 	  offset <= truncate(a);
 	  limit <= truncate(l);
+	  busy <= True;
        endmethod
+      method ActionValue#(Bool) finish() if (offset >= limit && busy);
+	 busy <= False;
+	 return True;
+      endmethod
        interface PipeOut pipe;
 	  method first = dfifo.first;
 	  method Action deq();

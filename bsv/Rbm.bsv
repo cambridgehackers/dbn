@@ -190,6 +190,7 @@ module [Module] mkDramBramMatrixMultiply(DramBramMatrixMultiply#(N,TMul#(N,32)))
 
    method ActionValue#(Bit#(32)) toBramDone();
       toBramDoneFifo.deq();
+      vfsources[1].vector.finish();
       return 0;
    endmethod
 
@@ -200,7 +201,7 @@ module [Module] mkDramBramMatrixMultiply(DramBramMatrixMultiply#(N,TMul#(N,32)))
    endmethod
 
    method ActionValue#(Bit#(32)) fromBramDone();
-      writeBackVectorSink.vector.pipe.deq();
+      let b <- writeBackVectorSink.vector.finish();
       return 0;
    endmethod
 
@@ -221,9 +222,11 @@ endmodule
 
 
 interface DmaStatesPipe#(numeric type n, numeric type dmasz);
-   interface Vector#(1, DmaVectorSource#(dmasz, Vector#(n,Float))) sources; 
-   interface Vector#(1, DmaVectorSink#(dmasz, Vector#(n,Float))) sinks; 
-   interface PipeOut#(Bool) donePipe;
+   interface Vector#(1, ObjectReadClient#(dmasz)) sources; 
+   interface Vector#(1, ObjectWriteClient#(dmasz)) sinks; 
+   method Action start(Bit#(32) readPointer, Bit#(32) readOffset,
+		       Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
+   method ActionValue#(Bool) finish();
 endinterface
 
 (* synthesize *)
@@ -234,15 +237,26 @@ module [Module] mkDmaStatesPipe(DmaStatesPipe#(N, DmaSz))
    PipeOut#(Vector#(N, Float)) dmaStatesPipe <- mkComputeStatesPipe(statesource.vector.pipe);
    DmaVectorSink#(DmaSz, Vector#(N, Float)) dmaStatesSink <- mkDmaVectorSink(dmaStatesPipe);
 
-   interface Vector sources = cons(statesource, nil);
-   interface Vector sinks = cons(dmaStatesSink, nil);
-   interface donePipe = dmaStatesSink.vector.pipe;
+   interface Vector sources = cons(statesource.dmaClient, nil);
+   interface Vector sinks = cons(dmaStatesSink.dmaClient, nil);
+   method Action start(Bit#(32) readPointer, Bit#(32) readOffset,
+				  Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
+      statesource.vector.start(readPointer, extend(readOffset), extend(unpack(numElts)));
+      dmaStatesSink.vector.start(writePointer, extend(writeOffset), extend(unpack(numElts)));
+   endmethod
+   method ActionValue#(Bool) finish();
+      let b <- dmaStatesSink.vector.finish();
+      return b;
+   endmethod
 endmodule
 
 interface DmaStatesPipe2#(numeric type n, numeric type dmasz);
-   interface Vector#(2, DmaVectorSource#(dmasz, Vector#(n,Float))) sources; 
-   interface Vector#(1, DmaVectorSink#(dmasz, Vector#(n,Float))) sinks; 
-   interface PipeOut#(Bool) donePipe;
+   interface Vector#(2, ObjectReadClient#(dmasz))  sources; 
+   interface Vector#(1, ObjectWriteClient#(dmasz)) sinks; 
+   method Action start(Bit#(32) readPointer, Bit#(32) readOffset,
+		       Bit#(32) readPointer2, Bit#(32) readOffset2,
+		       Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
+   method ActionValue#(Bool) finish();
 endinterface
 
 (* synthesize *)
@@ -253,9 +267,19 @@ module [Module] mkDmaStatesPipe2(DmaStatesPipe2#(N, DmaSz))
    PipeOut#(Vector#(N, Float)) dmaStatesPipe <- mkComputeStatesPipe2(statesources[0].vector.pipe, statesources[1].vector.pipe);
    DmaVectorSink#(DmaSz, Vector#(N, Float)) dmaStatesSink <- mkDmaVectorSink(dmaStatesPipe);
 
-   interface Vector sources = statesources;
-   interface Vector sinks = cons(dmaStatesSink, nil);
-   interface donePipe = dmaStatesSink.vector.pipe;
+   interface Vector sources = map(getSourceReadClient, statesources);
+   interface Vector sinks = cons(dmaStatesSink.dmaClient, nil);
+   method Action start(Bit#(32) readPointer, Bit#(32) readOffset,
+		       Bit#(32) readPointer2, Bit#(32) readOffset2,
+		       Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
+      statesources[0].vector.start(readPointer, extend(readOffset), extend(unpack(numElts)));
+      statesources[1].vector.start(readPointer2, extend(readOffset2), extend(unpack(numElts)));
+      dmaStatesSink.vector.start(writePointer, extend(writeOffset), extend(unpack(numElts)));
+   endmethod
+   method ActionValue#(Bool) finish();
+      let b <- dmaStatesSink.vector.finish();
+      return b;
+   endmethod
 endmodule
 
 interface DmaUpdateWeights#(numeric type n, numeric type dmasz);
@@ -263,6 +287,7 @@ interface DmaUpdateWeights#(numeric type n, numeric type dmasz);
    interface Vector#(1, ObjectWriteClient#(dmasz)) writeClients;
    interface PipeOut#(Bool) donePipe;
    method Action start(Bit#(32) posAssociationsPointer, Bit#(32) negAssociationsPointer, Bit#(32) weightsPointer, Bit#(32) numElts, Float learningRateOverNumExamples);
+   method ActionValue#(Bool) finish();
 endinterface
 
 (* synthesize *)
@@ -314,16 +339,24 @@ module [Module] mkDmaUpdateWeights(DmaUpdateWeights#(N, DmaSz))
       wfifo.enq(r);
    endrule
 
+   for (Integer i = 0; i < 3; i = i + 1)
+      rule finishSources;
+	 let b <- sources[i].vector.finish();
+      endrule
+
    //interface Vector sources = cons(statesource, nil);
    interface Vector readClients = map(getSourceReadClient, sources);
    interface Vector writeClients = cons(getSinkWriteClient(sink), nil);
-   interface PipeOut donePipe = sink.vector.pipe;
    method Action start(Bit#(32) posAssociationsPointer, Bit#(32) negAssociationsPointer, Bit#(32) weightsPointer, Bit#(32) numElts, Float lrone);
       learningRateOverNumExamples <= lrone;
       sources[0].vector.start(posAssociationsPointer, 0, extend(numElts));
       sources[1].vector.start(negAssociationsPointer, 0, extend(numElts));
       sources[2].vector.start(weightsPointer, 0, extend(numElts));
       sink.vector.start(weightsPointer, 0, extend(numElts));
+   endmethod
+   method ActionValue#(Bool) finish();
+      let b <- sink.vector.finish();
+      return b;
    endmethod
 endmodule
 interface DmaSumOfErrorSquared#(numeric type n, numeric type dmasz);
@@ -381,6 +414,11 @@ module [Module] mkDmaSumOfErrorSquared(DmaSumOfErrorSquared#(N, DmaSz))
    PipeOut#(Vector#(N, Float)) sumPipe = toPipeOut(resultFifo);
    function Float fsum(Float a, Float b); return a+b; endfunction
    PipeOut#(Float) foldedPipe <- mkMap(foldl(fsum, fromReal(0.0)), sumPipe);
+
+   for (Integer i = 0; i < 2; i = i + 1)
+      rule finishSources;
+	 let b <- sources[i].vector.finish();
+      endrule
 
    //interface Vector sources = cons(statesource, nil);
    interface Vector readClients = map(getSourceReadClient, sources);
@@ -445,22 +483,22 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
    //    ind.fromBramDone();
    // endrule
    rule sigmoidDone;
-      let d <- dmaSigmoid.pipe.deq();
+      let d <- dmaSigmoid.finish();
       busyFifo.deq();
       ind.sigmoidDone();
    endrule
    rule sigmoidTableUpdateDone;
-      let d <- dmaSigmoid.sigmoidTablePipe.deq();
+      let d <- dmaSigmoid.sigmoidTableUpdated();
       busyFifo.deq();
       ind.sigmoidTableUpdated(0);
    endrule
    rule dmaStatesDone;
-      dmaStates.sinks[0].vector.pipe.deq();
+      let b <- dmaStates.finish();
       busyFifo.deq();
       ind.statesDone();
    endrule
    rule dmaStatesDone2;
-      dmaStates2.sinks[0].vector.pipe.deq();
+      let b <- dmaStates2.finish();
       busyFifo.deq();
       ind.statesDone2();
    endrule
@@ -551,17 +589,17 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
       method Action computeStates(Bit#(32) readPointer, Bit#(32) readOffset,
 				  Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
 	 //$display("computeStates rh=%d wh=%d len=%d", readPointer, writePointer, numElts);
-	 dmaStates.sources[0].vector.start(readPointer, extend(readOffset), extend(unpack(numElts)));
-	 dmaStates.sinks[0].vector.start(writePointer, extend(writeOffset), extend(unpack(numElts)));
+      
 	 busyFifo.enq(True);
       endmethod
       method Action computeStates2(Bit#(32) readPointer, Bit#(32) readOffset,
 				   Bit#(32) readPointer2, Bit#(32) readOffset2,
 				   Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
 	 //$display("computeStates2 rh=%d wh=%d len=%d", readPointer, writePointer, numElts);
-	 dmaStates2.sources[0].vector.start(readPointer, extend(readOffset), extend(unpack(numElts)));
-	 dmaStates2.sources[1].vector.start(readPointer2, extend(readOffset2), extend(unpack(numElts)));
-	 dmaStates2.sinks[0].vector.start(writePointer, extend(writeOffset), extend(unpack(numElts)));
+	 dmaStates2.start(readPointer, readOffset,
+			  readPointer2, readOffset2,
+			  writePointer,writeOffset, numElts);
+
 	 busyFifo.enq(True);
       endmethod
       method Action updateWeights(Bit#(32) posAssociationsPointer,
@@ -590,13 +628,13 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
 						append(
 						   map(getSourceReadClient, sigmoidsources),
 						   append(
-						      map(getSourceReadClient, dmaStates.sources),
-						      map(getSourceReadClient, dmaStates2.sources))
+						      dmaStates.sources,
+						      dmaStates2.sources)
 						   )));
 
    interface Vector writeClients = append(
       append(dmaUpdateWeights.writeClients,
-	     cons(dmaSigmoid.dmaClient, cons(dmaStates.sinks[0].dmaClient, cons(dmaStates2.sinks[0].dmaClient, nil)))),
+	     cons(dmaSigmoid.dmaClient, cons(dmaStates.sinks[0], cons(dmaStates2.sinks[0], nil)))),
 //      append(
 	 dmaMMF.writeClients //,	     bramMMF.writeClients)
       );
