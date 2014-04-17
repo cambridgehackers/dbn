@@ -27,7 +27,7 @@ import Rbm::*;
 
 typedef enum {RbmIndication, RbmRequest, DmaIndication, DmaConfig} IfcNames deriving (Eq,Bits);
 
-module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty))
+module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,1))
    provisos (Add#(a__, addrWidth, 40),
 	     Add#(a__, b__, 40),
 	     Add#(addrWidth, c__, 52),
@@ -86,7 +86,7 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty))
       writeClients = rbm.writeClients;
    end
 
-   MemServer#(addrWidth, TMul#(32,N)) dma <- mkMemServer(dmaIndicationProxy.ifc, readClients, writeClients);
+   MemServer#(addrWidth, TMul#(32,N), 1) dma <- mkMemServer(dmaIndicationProxy.ifc, readClients, writeClients);
 
    DmaConfigWrapper dmaConfigWrapper <- mkDmaConfigWrapper(DmaConfig,dma.request);
 
@@ -103,6 +103,6 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty))
    
    interface interrupt = getInterruptVector(portals);
    interface slave = ctrl_mux;
-   interface master = dma.master;
+   interface masters = dma.masters;
 
 endmodule : mkPortalTop
