@@ -33,6 +33,7 @@ import Pipe::*;
 interface VectorSource#(numeric type dsz, type a);
    interface PipeOut#(a) pipe;
    method Action start(ObjectPointer h, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
+//   method Fmt dbg();
    method ActionValue#(Bool) finish();
 endinterface
 
@@ -52,7 +53,7 @@ module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
 	     Mul#(abytes, 8, asz)
 	     );
 
-   Bool verbose = True;
+   Bool verbose = False;
 
    let asz = valueOf(asz);
    let abytes = valueOf(abytes);
@@ -72,6 +73,9 @@ module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
 	 let b <- memreadEngine.finish();
 	 return b;
       endmethod
+//      method Fmt dbg();
+//	 return memreadEngine.dbg();
+//      endmethod
        interface PipeOut pipe;
 	  method first();
 	     return unpack(dfifo.first());
@@ -175,6 +179,9 @@ module [Module] mkBramVectorSource(BramVectorSource#(addrsz, dsz, dtype))
 	 busy <= False;
 	 return True;
       endmethod
+//   method Fmt dbg();
+//      return fshow("bramvectorsource");
+//   endmethod
        interface PipeOut pipe;
 	  method first = dfifo.first;
 	  method Action deq();

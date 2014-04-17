@@ -99,10 +99,10 @@ function ObjectWriteClient#(asz) getSinkWriteClient(DmaVectorSink#(asz,a) s); re
 interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
    interface Vector#(2, ObjectReadClient#(dmasz)) readClients;
    interface Vector#(1, ObjectWriteClient#(dmasz)) writeClients;
-   interface PipeOut#(Bool) donePipe;
    method Action start(ObjectPointer pointerA, UInt#(ObjectOffsetSize) numRowsA, UInt#(ObjectOffsetSize) numColumnsA,
 		       ObjectPointer pointerB, UInt#(ObjectOffsetSize) numRowsB, UInt#(ObjectOffsetSize) numColumnsB,
 		       ObjectPointer pointerC);
+   method ActionValue#(Bool) finish();
    method Bit#(32) dbg();
 endinterface
 
@@ -114,8 +114,8 @@ module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
    DmaMatrixMultiplyIfc#(ObjectOffsetSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
    interface Vector readClients = map(getSourceReadClient, vfsources);
    interface Vector writeClients = cons(dmaMMF.dmaClient, nil);
-   interface PipeOut donePipe = dmaMMF.pipe;
    method start = dmaMMF.start;
+   method finish = dmaMMF.finish;
    method Bit#(32) dbg();
       Bit#(32) d = 0;
       d[0] = pack(vfsources[0].vector.pipe.notEmpty());
@@ -127,10 +127,10 @@ endmodule
 interface DramBramMatrixMultiply#(numeric type n, numeric type dmasz);
    interface Vector#(2, ObjectReadClient#(dmasz)) readClients;
    interface Vector#(2, ObjectWriteClient#(dmasz)) writeClients;
-   interface PipeOut#(Bool) donePipe;
    method Action start(ObjectPointer pointerA, UInt#(ObjectOffsetSize) numRowsA, UInt#(ObjectOffsetSize) numColumnsA,
 		       ObjectPointer pointerB, UInt#(ObjectOffsetSize) numRowsB, UInt#(ObjectOffsetSize) numColumnsB,
 		       ObjectPointer pointerC);
+   method ActionValue#(Bool) finish();
    method Action toBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts);
    method ActionValue#(Bit#(32)) toBramDone();
    method Action fromBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts);
@@ -210,8 +210,8 @@ module [Module] mkDramBramMatrixMultiply(DramBramMatrixMultiply#(N,TMul#(N,32)))
       cons(writeBackVectorSink.dmaClient,
 	 cons(dmaMMF.dmaClient,
 	    nil));
-   interface PipeOut donePipe = dmaMMF.pipe;
    method start = dmaMMF.start;
+   method finish = dmaMMF.finish;
    method Bit#(32) dbg();
       Bit#(32) d = 0;
       d[0] = pack(vfsources[0].vector.pipe.notEmpty());
@@ -285,7 +285,6 @@ endmodule
 interface DmaUpdateWeights#(numeric type n, numeric type dmasz);
    interface Vector#(3, ObjectReadClient#(dmasz)) readClients;
    interface Vector#(1, ObjectWriteClient#(dmasz)) writeClients;
-   interface PipeOut#(Bool) donePipe;
    method Action start(Bit#(32) posAssociationsPointer, Bit#(32) negAssociationsPointer, Bit#(32) weightsPointer, Bit#(32) numElts, Float learningRateOverNumExamples);
    method ActionValue#(Bool) finish();
 endinterface
@@ -463,12 +462,13 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
 
    FIFOF#(Bool) busyFifo <- mkFIFOF();
    rule mmfDone;
-      let d <- dmaMMF.donePipe.deq();
+      $display("mmfDone");
+      let d <- dmaMMF.finish();
       busyFifo.deq();
       ind.mmfDone();
    endrule
    // rule bramMmfDone;
-   //    let d <- bramMMF.donePipe.deq();
+   //    let d <- bramMMF.finish();
    //    busyFifo.deq();
    //    ind.bramMmfDone();
    // endrule
@@ -483,33 +483,39 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
    //    ind.fromBramDone();
    // endrule
    rule sigmoidDone;
+      $display("sigmoidDone");
       let d <- dmaSigmoid.finish();
       busyFifo.deq();
       ind.sigmoidDone();
    endrule
    rule sigmoidTableUpdateDone;
+      $display("sigmoidDone");
       let d <- dmaSigmoid.sigmoidTableUpdated();
       busyFifo.deq();
       ind.sigmoidTableUpdated(0);
    endrule
    rule dmaStatesDone;
+      $display("dmaStatesDone");
       let b <- dmaStates.finish();
       busyFifo.deq();
       ind.statesDone();
    endrule
    rule dmaStatesDone2;
+      $display("dmaStatesDone2");
       let b <- dmaStates2.finish();
       busyFifo.deq();
       ind.statesDone2();
    endrule
 
    rule dmaUpdateWeightsDone;
-      dmaUpdateWeights.donePipe.deq();
+      $display("dmaUpdateWeightsDone");
+      let b <- dmaUpdateWeights.finish();
       busyFifo.deq();
       ind.updateWeightsDone();
    endrule
 
    rule dmaSumOfErrorSquaredDone;
+      $display("dmaSumOfErrorSquaredDone");
       dmaSumOfErrorSquared.pipe.deq();
       busyFifo.deq();
       ind.sumOfErrorSquared(pack(dmaSumOfErrorSquared.pipe.first()));
@@ -589,7 +595,8 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
       method Action computeStates(Bit#(32) readPointer, Bit#(32) readOffset,
 				  Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
 	 //$display("computeStates rh=%d wh=%d len=%d", readPointer, writePointer, numElts);
-      
+	 dmaStates.start(readPointer, readOffset,
+			 writePointer, writeOffset, numElts);
 	 busyFifo.enq(True);
       endmethod
       method Action computeStates2(Bit#(32) readPointer, Bit#(32) readOffset,

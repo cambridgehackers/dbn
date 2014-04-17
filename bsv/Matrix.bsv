@@ -167,7 +167,7 @@ interface DmaMatrixMultiplyIfc#(numeric type addrwidth, numeric type dsz);
    method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC);
-   interface PipeOut#(Bool) pipe;
+   method ActionValue#(Bool) finish();
 endinterface
 
 typedef enum {
@@ -212,6 +212,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
    Reg#(Bool) running <- mkReg(False);
    FIFOF#(Bool) doneFifo <- mkFIFOF();
 
+   FIFOF#(Bool) waitingForB <- mkFIFOF();
    for (Integer i = 0; i < k; i = i + 1) begin
       rule startDotProd;
 	  Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[i].first;
@@ -220,7 +221,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
 	  let row = tpl_1(xy);
 	  let col = tpl_2(xy)+fromInteger(i);
 
-	  if (verbose) $display($format(fshow("startDotProd xy=")+fshow(tuple2(row,col))));
+	 if (verbose) $display($format(fshow("startDotProd xy=")+fshow(tuple2(row,col))+fshow(" acols=")+fshow(descriptorA.numColumns)+fshow(" bcols=")+fshow(descriptorB.numColumns)));
 	  let startA = row*descriptorA.numColumns/fromInteger(n); // row major
 	  let startB = col*descriptorB.numColumns/fromInteger(n); // col major layout (pre-transposed)
 	  let startC = (row*descriptorC.numColumns + col) / fromInteger(n); // row major
@@ -236,10 +237,17 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
        endrule
        if (i == 0)
 	  rule finishSourceA;
+	     //$display($format(fshow("sourceA[0].finish ")+sourceA[0].dbg()));
 	     let b <- sourceA[0].finish();
+	     //waitingForB.enq(True);
 	  endrule
       rule finishSourceB;
+	 $display("sourceB[%d].finish", i);
 	 let b <- sourceB[i].finish();
+	 //waitingForB.deq();
+      endrule
+      rule waiting if (waitingForB.notEmpty);
+	 //$display($format(fshow("waiting for B: ")+ sourceB[i].dbg()));
       endrule
       
    end
@@ -262,6 +270,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
       // each time we write a burst of k values via sinkC
       let b <- sinkC.vector.finish();
       let c = dpCount-fromInteger(k);
+      $display("sinkDone c=%d", c);
       dpCount <= c;
       if (c == 0) begin
 	 running <= False;
@@ -284,7 +293,11 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
       if (verbose) $display($format(fshow("mm.start ")+fshow(xycfg)));
       xypipeifc.start(xycfg);
    endmethod
+   method ActionValue#(Bool) finish();
+      $display("mm.finish()");
+      doneFifo.deq();
+      return True;
+   endmethod
 
    interface ObjectWriteClient dmaClient = sinkC.dmaClient;
-   interface PipeOut pipe = toPipeOut(doneFifo);
 endmodule
