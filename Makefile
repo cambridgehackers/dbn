@@ -11,6 +11,8 @@ XBSVFLAGS = --clib opencv_core
 Dma = Dma32
 PINS = Std
 
+gen:: datasets
+
 include ../xbsv/Makefile.common
 
 datasets:
