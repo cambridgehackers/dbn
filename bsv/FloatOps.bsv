@@ -2,6 +2,7 @@ import FIFOF::*;
 import GetPut::*;
 import ClientServer::*;
 import FloatingPoint::*;
+import DefaultValue::*;
 import Randomizable::*;
 import Vector::*;
 import StmtFSM::*;
@@ -23,6 +24,21 @@ module mkFloatAdder(FloatServer2#(Float));
 	 return resp;
       endmethod
    endinterface
+endmodule
+
+module mkFloatAddPipe#(PipeOut#(Tuple2#(Float,Float)) xypipe)(PipeOut#(Float));
+   let adder <- mkFloatAdder();
+   FIFOF#(Float) fifo <- mkFIFOF();
+   rule consumexy;
+      let xy = xypipe.first();
+      xypipe.deq;
+      adder.request.put(tuple3(tpl_1(xy),tpl_2(xy),defaultValue));
+   endrule
+   rule enqout;
+      let resp <- adder.response.get();
+      fifo.enq(tpl_1(resp));
+   endrule
+   return toPipeOut(fifo);
 endmodule
 
 (* synthesize *)
