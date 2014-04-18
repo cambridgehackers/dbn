@@ -122,7 +122,7 @@ int main(int argc, const char **argv)
     PortalMat pm1(m1);
     PortalMat pm2(m2);
     PortalMat pm3;
-    dumpMatf("pm1", "%5.1f", pm1);
+    dumpMat<float>("pm1", "%5.1f", pm1);
     dumpMat<float>("pm2", "%5.1f", pm2);
     pm3.sigmoid(pm1);
     dumpMat<float>("sigmoid", "%5.1f", pm3);
