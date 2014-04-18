@@ -144,4 +144,28 @@ module mkMap#(function b f(a av), PipeOut#(a) apipe)(PipeOut#(b));
    endmethod
 endmodule
 
+typedef (function Module #(PipeOut #(tb)) mkPipeOut(PipeOut#(ta) ifc)) MkPipeOut#(type ta, type tb);
 
+typeclass ReducePipe#( numeric type n, type a);
+   module [Module] mkReducePipe (MkPipeOut#(Tuple2#(a,a), a) combinepipe,
+				 PipeOut#(Vector#(n,a)) inpipe,
+				 PipeOut#(a) ifc);
+endtypeclass
+instance ReducePipe#(1, a);
+   module [Module] mkReducePipe (MkPipeOut#(Tuple2#(a,a), a) combinepipe,
+				 PipeOut#(Vector#(1,a)) inpipe,
+				 PipeOut#(a) ifc);
+      let pipe <- mkMap(head, inpipe);
+      return pipe;
+   endmodule
+endinstance
+instance ReducePipe#(2, a);
+   module [Module] mkReducePipe (MkPipeOut#(Tuple2#(a,a), a) combinepipe,
+				 PipeOut#(Vector#(2,a)) inpipe,
+				 PipeOut#(a) ifc);
+      function Tuple2#(a,a) foo(Vector#(2,a) invec); return tuple2(invec[0], invec[1]); endfunction
+      PipeOut#(Tuple2#(a,a)) zippipe <- mkMap(foo, inpipe);
+      let pipe <- combinepipe(zippipe);
+      return pipe;
+   endmodule
+endinstance
