@@ -34,7 +34,8 @@ import FloatOps::*;
 
 module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,Float)) ypipe, UInt#(nwidth) numElts)(PipeOut#(Float))
    provisos (
-      Add#(1,a__,n)
+      Add#(1,a__,n),
+      ReducePipe#(n,Float)
       );
 
    Bool verbose = True;
@@ -45,7 +46,7 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
    Vector#(n, FIFO#(Maybe#(Float))) accumFifo <- replicateM(mkFIFO());
    Reg#(UInt#(nwidth)) countInReg <- mkReg(0);
    Reg#(UInt#(nwidth)) countOutReg <- mkReg(0);
-   FIFOF#(Float) resultFifo <- mkFIFOF();
+   FIFOF#(Vector#(n,Float)) resultFifo <- mkFIFOF();
 
    rule mul;
       let v = xypipe.first;
@@ -71,7 +72,7 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
    endrule
 
    rule macout;
-      Vector#(n,Float) vs;
+      Vector#(n,Float) vs = unpack(0);
       let c = countOutReg + 1;
       for (Integer i = 0; i < valueOf(n); i = i + 1) begin
 	 let resp <- macs[i].response.get();
@@ -79,21 +80,18 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
 	 if (c < numElts) begin
 	    accumFifo[i].enq(tagged Valid tpl_1(resp));
 	 end
-	 else begin
-	    // FIXME need to fold the values together, but we're only compiling for n == 1
-	    $display("resultFifo.enq %h", tpl_1(resp));
-	    if (i == 0) begin
-	       resultFifo.enq(tpl_1(resp));
-	    end
-	 end
       end
+      Vector#(n,Bit#(32)) ivs = unpack(pack(vs));
+      resultFifo.enq(vs);
+
       if (c == numElts)
 	 c = 0;
       countOutReg <= c;
-      if (verbose) $display(fshow("countOutReg=")+fshow(countOutReg)+fshow(" numElts=")+fshow(numElts)+fshow(" mul=") + fshow(vs));
+      if (verbose) $display(fshow("countOutReg=")+fshow(countOutReg)+fshow(" numElts=")+fshow(numElts)+fshow(" mul=") + fshow(ivs));
    endrule
 
-   PipeOut#(Float) dotpipe = toPipeOut(resultFifo);
+   PipeOut#(Vector#(n,Float)) resultPipe = toPipeOut(resultFifo);
+   PipeOut#(Float) dotpipe <- mkReducePipe(mkFloatAddPipe, resultPipe);
    return dotpipe;
 endmodule
 
