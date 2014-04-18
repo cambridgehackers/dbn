@@ -42,7 +42,7 @@ import FloatOps::*;
 import Pipe::*;
 
 // these typedefs are so we can have synthesizeable modules below
-typedef 1 N;
+typedef 2 N;
 typedef TMul#(32,N) DmaSz;
 
 interface RbmIndication;
@@ -97,7 +97,7 @@ function ObjectReadClient#(asz) getSourceReadClient(DmaVectorSource#(asz,a) s); 
 function ObjectWriteClient#(asz) getSinkWriteClient(DmaVectorSink#(asz,a) s); return s.dmaClient; endfunction
 
 interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
-   interface Vector#(2, ObjectReadClient#(dmasz)) readClients;
+   interface Vector#(TAdd#(N,1), ObjectReadClient#(dmasz)) readClients;
    interface Vector#(1, ObjectWriteClient#(dmasz)) writeClients;
    method Action start(ObjectPointer pointerA, UInt#(ObjectOffsetSize) numRowsA, UInt#(ObjectOffsetSize) numColumnsA,
 		       ObjectPointer pointerB, UInt#(ObjectOffsetSize) numRowsB, UInt#(ObjectOffsetSize) numColumnsB,
@@ -108,9 +108,9 @@ endinterface
 
 (* synthesize *)
 module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
-   Vector#(2, DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
+   Vector#(TAdd#(N,1), DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
    Vector#(1, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = cons(vfsources[0].vector, nil);
-   Vector#(1, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = cons(vfsources[1].vector, nil);
+   Vector#(N, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = takeAt(1, map(dmaVectorSourceVector, vfsources));
    DmaMatrixMultiplyIfc#(ObjectOffsetSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
    interface Vector readClients = map(getSourceReadClient, vfsources);
    interface Vector writeClients = cons(dmaMMF.dmaClient, nil);
@@ -123,103 +123,6 @@ module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
       return d;
    endmethod
 endmodule
-
-interface DramBramMatrixMultiply#(numeric type n, numeric type dmasz);
-   interface Vector#(2, ObjectReadClient#(dmasz)) readClients;
-   interface Vector#(2, ObjectWriteClient#(dmasz)) writeClients;
-   method Action start(ObjectPointer pointerA, UInt#(ObjectOffsetSize) numRowsA, UInt#(ObjectOffsetSize) numColumnsA,
-		       ObjectPointer pointerB, UInt#(ObjectOffsetSize) numRowsB, UInt#(ObjectOffsetSize) numColumnsB,
-		       ObjectPointer pointerC);
-   method ActionValue#(Bool) finish();
-   method Action toBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts);
-   method ActionValue#(Bit#(32)) toBramDone();
-   method Action fromBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts);
-   method ActionValue#(Bit#(32)) fromBramDone();
-   method Bit#(32) dbg();
-endinterface
-
-(* synthesize *)
-module [Module] mkDramBramMatrixMultiply(DramBramMatrixMultiply#(N,TMul#(N,32)));
-   Vector#(2, DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
-   Vector#(1, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = cons(vfsources[0].vector, nil);
-   Vector#(1, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = cons(vfsources[1].vector, nil);
-
-   BRAM_Configure bramCfg = defaultValue;
-   bramCfg.memorySize = 4096;
-   BRAM2Port#(Bit#(14), Vector#(N,Float)) bram2Server <- mkBRAM2Server(bramCfg);
-   BramVectorSource#(14,32,Vector#(N,Float)) bramVectorSource <- mkBramVectorSource();
-   mkConnection(bramVectorSource.bramClient, bram2Server.portA);
-
-   FIFOF#(Vector#(N,Float)) wbfifo <- mkFIFOF();
-   DmaVectorSink#(DmaSz, Vector#(N,Float)) writeBackVectorSink <- mkDmaVectorSink(toPipeOut(wbfifo));
-
-   DmaMatrixMultiplyIfc#(ObjectOffsetSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, cons(bramVectorSource.vector, nil), mkDmaVectorSink);
-
-   Reg#(Bit#(14)) bramWriteOffset <- mkReg(0);
-   Reg#(Bit#(14)) bramWriteLimit <- mkReg(0);
-   FIFO#(Bool) toBramDoneFifo <- mkFIFO();
-
-   rule tobram if (bramWriteOffset < bramWriteLimit);
-      let data = vfsources[1].vector.pipe.first();
-      vfsources[1].vector.pipe.deq();
-
-      bram2Server.portB.request.put( BRAMRequest { write: True, responseOnWrite: False, address: bramWriteOffset, datain: data });
-      let offset = bramWriteOffset + 1;
-      bramWriteOffset <= offset;
-      if (offset == bramWriteLimit)
-	 toBramDoneFifo.enq(True);
-   endrule
-
-   Reg#(Bit#(14)) bramReadOffset <- mkReg(0);
-   Reg#(Bit#(14)) bramReadLimit <- mkReg(0);
-   (* descending_urgency = "tobram, frombram" *)
-   rule frombram if (bramReadOffset < bramReadLimit);
-      bram2Server.portB.request.put( BRAMRequest { write: False, responseOnWrite: False, address: bramReadOffset, datain: ? });
-      bramReadOffset <= bramReadOffset + 1;
-   endrule
-   rule bramtodram;
-      let d <- bram2Server.portB.response.get();
-      wbfifo.enq(d);
-   endrule
-
-   method Action toBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts) if (bramWriteOffset >= bramWriteLimit);
-      bramWriteOffset <= truncate(off);
-      bramWriteLimit <= truncate(off+numElts);
-      vfsources[1].vector.start(pointer, extend(offset), extend(numElts));
-   endmethod
-
-   method ActionValue#(Bit#(32)) toBramDone();
-      toBramDoneFifo.deq();
-      vfsources[1].vector.finish();
-      return 0;
-   endmethod
-
-   method Action fromBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts) if (bramReadOffset >= bramReadLimit);
-      bramReadOffset <= truncate(off);
-      bramReadLimit <= truncate(off+numElts);
-      writeBackVectorSink.vector.start(pointer, extend(offset), extend(numElts));
-   endmethod
-
-   method ActionValue#(Bit#(32)) fromBramDone();
-      let b <- writeBackVectorSink.vector.finish();
-      return 0;
-   endmethod
-
-   interface Vector readClients = map(getSourceReadClient, vfsources);
-   interface Vector writeClients = 
-      cons(writeBackVectorSink.dmaClient,
-	 cons(dmaMMF.dmaClient,
-	    nil));
-   method start = dmaMMF.start;
-   method finish = dmaMMF.finish;
-   method Bit#(32) dbg();
-      Bit#(32) d = 0;
-      d[0] = pack(vfsources[0].vector.pipe.notEmpty());
-      d[1] = pack(vfsources[1].vector.pipe.notEmpty());
-      return d;
-   endmethod
-endmodule
-
 
 interface DmaStatesPipe#(numeric type n, numeric type dmasz);
    interface Vector#(1, ObjectReadClient#(dmasz)) sources; 
@@ -411,8 +314,7 @@ module [Module] mkDmaSumOfErrorSquared(DmaSumOfErrorSquared#(N, DmaSz))
    endrule
 
    PipeOut#(Vector#(N, Float)) sumPipe = toPipeOut(resultFifo);
-   function Float fsum(Float a, Float b); return a+b; endfunction
-   PipeOut#(Float) foldedPipe <- mkMap(foldl(fsum, fromReal(0.0)), sumPipe);
+   PipeOut#(Float) foldedPipe <- mkReducePipe(mkFloatAddPipe, sumPipe);
 
    for (Integer i = 0; i < 2; i = i + 1)
       rule finishSources;
@@ -434,7 +336,7 @@ endmodule
 
 interface Rbm#(numeric type n);
    interface RbmRequest request;
-   interface Vector#(12, ObjectReadClient#(TMul#(32,n))) readClients;
+   interface Vector#(TAdd#(11,N), ObjectReadClient#(TMul#(32,n))) readClients;
    interface Vector#(5, ObjectWriteClient#(TMul#(32,n))) writeClients;
 endinterface
 

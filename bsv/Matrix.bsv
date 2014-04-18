@@ -61,10 +61,12 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
 	 end
 	 if (verbose) $display($format(fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y) + fshow(" accum=")+fshow(pack(accum))));
          macs[i].request.put(tuple4(accum, x[i], y[i], defaultValue));
-	 let c = countInReg + 1;
-	 if (c == numElts)
-	    c = 0;
-	 countInReg <= c;
+	 if (i == 0) begin
+	    let c = countInReg + 1;
+	    if (c == numElts)
+	       c = 0;
+	    countInReg <= c;
+	 end
       end
    endrule
 
@@ -174,16 +176,18 @@ typedef enum {
    Idle, Ready, Running, Done
    } MMState deriving (Bits, Eq);
 
-module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Float))) sourceA,
-				     Vector#(k, VectorSource#(dsz, Vector#(1, Float))) sourceB,
-				     function Module#(DmaVectorSink#(dsz, Vector#(1, Float))) mkSink(PipeOut#(Vector#(1, Float)) pipe_in)
+typedef 2 N;
+
+module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Float))) sourceA,
+				     Vector#(k, VectorSource#(dsz, Vector#(N, Float))) sourceB,
+				     function Module#(DmaVectorSink#(dsz, Vector#(N, Float))) mkSink(PipeOut#(Vector#(N, Float)) pipe_in)
 				     )(DmaMatrixMultiplyIfc#(addrwidth, dsz))
    provisos (Add#(a__,ObjectOffsetSize,addrwidth)
-	     , Add#(1,0,n)
-	     , Add#(1,c__,k)
+	     , Add#(N,0,n)
+	     , Add#(N,0,k)
 	     , FShow#(Float)
 	     , Arith#(Float)
-	     , Bits#(Vector#(1, Float), dsz));
+	     , Bits#(Vector#(N, Float), dsz));
 
    let n = valueOf(n);
    let k = valueOf(k);
@@ -195,14 +199,14 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorC <- mkReg(unpack(0));
    Reg#(UInt#(addrwidth)) dpCount <- mkReg(0);
 
-   Vector#(k, PipeOut#(Vector#(1,Float))) aPipes <- mkForkVector(sourceA[0].pipe);
+   Vector#(k, PipeOut#(Vector#(N,Float))) aPipes <- mkForkVector(sourceA[0].pipe);
 
    function Module#(PipeOut#(Float)) mkFxDotProd(Integer i);
       return mkDotProd(aPipes[i], sourceB[i].pipe, descriptorA.numColumns/fromInteger(n));
    endfunction
    Vector#(n, PipeOut#(Float)) fxdotprods <- genWithM(mkFxDotProd);
 
-   FIFOF#(Vector#(n,Float)) dfifo <- mkFIFOF();
+   FIFOF#(Vector#(N,Float)) dfifo <- mkFIFOF();
    let sinkC <- mkSink(toPipeOut(dfifo));
 
    XYRangePipeIfc#(UInt#(addrwidth)) xypipeifc <- mkXYRangePipeOut();
@@ -212,7 +216,6 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
    Reg#(Bool) running <- mkReg(False);
    FIFOF#(Bool) doneFifo <- mkFIFOF();
 
-   FIFOF#(Bool) waitingForB <- mkFIFOF();
    for (Integer i = 0; i < k; i = i + 1) begin
       rule startDotProd;
 	  Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[i].first;
@@ -239,15 +242,10 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
 	  rule finishSourceA;
 	     //$display($format(fshow("sourceA[0].finish ")+sourceA[0].dbg()));
 	     let b <- sourceA[0].finish();
-	     //waitingForB.enq(True);
 	  endrule
       rule finishSourceB;
 	 $display("sourceB[%d].finish", i);
 	 let b <- sourceB[i].finish();
-	 //waitingForB.deq();
-      endrule
-      rule waiting if (waitingForB.notEmpty);
-	 //$display($format(fshow("waiting for B: ")+ sourceB[i].dbg()));
       endrule
       
    end
@@ -255,7 +253,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(1, Fl
    rule dotProdValue;
       Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[n].first;
       xypipes[n].deq;
-      Vector#(n,Float) vs;
+      Vector#(N,Float) vs;
       for (Integer i = 0; i < k; i = i + 1) begin
 	 let v = fxdotprods[i].first;
 	 fxdotprods[i].deq;
