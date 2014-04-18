@@ -21,6 +21,7 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <unistd.h>
 #include "portalmat.h"
 #include <StdDmaIndication.h>
 
@@ -305,7 +306,7 @@ void configureSigmoidTable(RbmRequestProxy *device, RbmIndication *indication)
   sem_wait(&mul_sem);
 
   int num_entries = indication->sigmoidTableSize();
-  int addrsize = log(num_entries) / log(2.0);
+  int addrsize = log((double)num_entries) / log(2.0);
 
   float range = 16.0;
   float lowest_angle = - range/2.0;
@@ -368,7 +369,4 @@ void dumpMat(const char *prefix, const char *fmt, const cv::Mat &mat)
     fprintf(stderr, "\n");
   }
 }
-void dumpMatf(const char *prefix, const char *fmt, const cv::Mat &mat)
-{
-    dumpMat<float>(prefix, fmt, mat);
-}
+template void dumpMat<float>(const char *prefix, const char *fmt, const cv::Mat &mat);
