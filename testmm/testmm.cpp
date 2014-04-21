@@ -114,11 +114,11 @@ int main(int argc, const char **argv)
 
   matAllocator = new PortalMatAllocator(dma);
 
-  cv::Mat m1 = (cv::Mat_<float>(4,6) <<
+  cv::Mat m1 = (cv::Mat_<float>(4,8) <<
 		1,2,3,4,5,
 		4,5,6,7,8,
 		7,8,9,10,11);
-  cv::Mat m2 = (cv::Mat_<float>(4,6) <<
+  cv::Mat m2 = (cv::Mat_<float>(4,8) <<
 		11,12,13,14,15,
 		16,17,18,19,20,
 		21,22,23,24,25
@@ -130,6 +130,8 @@ int main(int argc, const char **argv)
   dumpMat<float>("pm2", "%5.1f", pm2);
   pm3.multf(pm1, pm2);
   dumpMat<float>("pm1 * pm2", "%5.1f", pm3);
+  cv::Mat  m3 = pm1 * pm2.t();
+  dumpMat<float>("m1 * m2", "%5.1f", m3);
 
   //device->finish();
   exit(0);
