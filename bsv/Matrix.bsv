@@ -247,9 +247,10 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 	  end
 	 sourceB[i].start(descriptorB.pointer, pack(truncate(startB)), pack(truncate(descriptorB.numColumns)));
 	 UInt#(TLog#(n)) in = fromInteger(i);
+	 Bit#(TAdd#(1,TLog#(n))) nn = fromInteger(n);
 	 $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
 	  if (i == 0)
-	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC)), extend(pack(in)));
+	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC)), extend(nn));
        endrule
        if (i == 0)
 	  rule finishSourceA;
