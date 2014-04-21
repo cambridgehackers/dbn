@@ -259,6 +259,7 @@ endmodule
 interface Rbm#(numeric type n);
    interface RbmRequest rbmRequest;
    interface MmRequest mmRequest;
+   interface SigmoidRequest sigmoidRequest;
    interface TimerRequest timerRequest;
    interface Vector#(TAdd#(11,N), ObjectReadClient#(TMul#(32,n))) readClients;
    interface Vector#(5, ObjectWriteClient#(TMul#(32,n))) writeClients;
