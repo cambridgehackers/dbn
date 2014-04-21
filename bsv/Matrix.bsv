@@ -155,7 +155,7 @@ module mkXYRangePipeOut(XYRangePipeIfc#(a)) provisos (Arith#(a), Bits#(a,awidth)
       endmethod
    endinterface
    method Action start(XYRangeConfig#(a) cfg) if (x >= xlimit);
-      $display("XYRangePipe x=%d xlimit=%d xstep=%d y=%d ylimit=%d ystep=%d", cfg.xbase, cfg.xlimit, cfg.xstep, cfg.ybase, cfg.ylimit, cfg.ystep);
+      //$display("XYRangePipe x=%d xlimit=%d xstep=%d y=%d ylimit=%d ystep=%d", cfg.xbase, cfg.xlimit, cfg.xstep, cfg.ybase, cfg.ylimit, cfg.ystep);
       x <= cfg.xbase;
       y <= cfg.ybase;
       xbase <= cfg.xbase;
@@ -203,7 +203,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 
    let n = valueOf(n);
    let nshift = valueOf(nshift);
-   Bool verbose = True;
+   Bool verbose = False;
 
    Reg#(Bool) doneReg <- mkReg(False);
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorA <- mkReg(unpack(0));
@@ -251,23 +251,23 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 
 	  if (i == 0) begin
 	     sourceA[0].start(descriptorA.pointer, pack(truncate(startA>>nshift)), pack(truncate(descriptorA.numColumns>>nshift)));
-	     $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
+	     if (verbose) $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
 	  end
 	 sourceB[i].start(descriptorB.pointer, pack(truncate(startB>>nshift)), pack(truncate(descriptorB.numColumns>>nshift)));
 	 UInt#(TLog#(n)) in = fromInteger(i);
 	 Bit#(TAdd#(1,TLog#(n))) nn = fromInteger(n);
-	 $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
+	 if (verbose) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
 	  if (i == 0)
 	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC>>nshift)), 1);
        endrule
        if (i == 0)
 	  rule finishSourceA;
-	     $display($format(fshow(cycles)+fshow("    sourceA[0].finish ")));
+	     if (verbose) $display($format(fshow(cycles)+fshow("    sourceA[0].finish ")));
 	     let b <- sourceA[0].finish();
 	  endrule
       rule finishSourceB;
 	 UInt#(TLog#(n)) in = fromInteger(i);
-	 $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].finish")));
+	 if (verbose) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].finish")));
 	 let b <- sourceB[i].finish();
       endrule
       
@@ -293,7 +293,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
       xypipes[n+1].deq;
       let b <- sinkC.vector.finish();
       let c = dotprodCount-fromInteger(n);
-      $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)+fshow("    xy=")+fshow(xy)));
+      if (verbose) $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)+fshow("    xy=")+fshow(xy)));
       dotprodCount <= c;
       if (c == 0) begin
 	 running <= False;
@@ -311,13 +311,13 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
       descriptorC <= MatrixDescriptor { pointer: pointerC, base: 0, numRows: numRowsA, numColumns: numRowsB};
       dotprodCount <= numRowsA*numRowsB;
 
-      $display("mm pointerA=%d pointerB=%d pointerC=%d\n", pointerA, pointerB, pointerC);
+      if (verbose) $display("mm pointerA=%d pointerB=%d pointerC=%d\n", pointerA, pointerB, pointerC);
       if (verbose) $display("mm.start ra=%d ca=%d rb=%d cb=%d dotprodCount=%d", numRowsA, numColumnsA, numRowsB, numColumnsB, dotprodCount);
       if (verbose) $display($format(fshow("mm.start ")+fshow(xycfg)));
       xypipeifc.start(xycfg);
    endmethod
    method ActionValue#(Bool) finish();
-      $display("mm.finish()");
+      if (verbose) $display("mm.finish()");
       doneFifo.deq();
       return True;
    endmethod
@@ -372,7 +372,6 @@ module [Module] mkMm#(MmIndication ind, TimerIndication timerInd)(Mm#(N))
 
    FIFOF#(Bool) busyFifo <- mkFIFOF();
    rule mmfDone;
-      $display("mmfDone");
       let d <- dmaMMF.finish();
       busyFifo.deq();
       ind.mmfDone();
