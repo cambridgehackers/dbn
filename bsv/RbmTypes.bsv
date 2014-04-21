@@ -20,7 +20,11 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+`ifndef N_VALUE
 typedef 2 N;
+`else
+typedef `N_VALUE N;
+`endif
 typedef TMul#(32,N) DmaSz;
 
 typedef enum {
