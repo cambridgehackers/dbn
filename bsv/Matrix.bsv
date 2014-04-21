@@ -182,8 +182,6 @@ typedef enum {
    Idle, Ready, Running, Done
    } MMState deriving (Bits, Eq);
 
-typedef 2 N;
-
 module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Float))) sourceA,
 				     Vector#(N, VectorSource#(dsz, Vector#(N, Float))) sourceB,
 				     function Module#(DmaVectorSink#(dsz, Vector#(N, Float))) mkSink(PipeOut#(Vector#(N, Float)) pipe_in)

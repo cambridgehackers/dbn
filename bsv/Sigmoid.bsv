@@ -10,11 +10,11 @@ import BRAM::*;
 import DefaultValue::*;
 import FloatingPoint::*;
 import Real::*;
-import BRAM::*;
 import Dma::*;
 import DmaVector::*;
 import Pipe::*;
 import FloatOps::*;
+import RbmTypes::*;
 
 interface SigmoidTable#(numeric type tsz);
    interface Vector#(2, BRAMServer#(Bit#(tsz), Vector#(3,Float))) ports;
@@ -156,8 +156,6 @@ module [Module] mkSigmoid#(SigmoidTable#(tsz) sigmoidTable, PipeOut#(Float) in)(
    mkConnection(in, server.request);
    return toPipeOut(rfifo);
 endmodule
-
-typedef 2 N;
 
 interface DmaSigmoidIfc#(numeric type dsz);
    method Action start(ObjectPointer pointerA, ObjectPointer pointerB, UInt#(ObjectOffsetSize) numElts);
