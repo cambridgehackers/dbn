@@ -32,8 +32,14 @@
 #include "DmaConfigProxy.h"
 #include "RbmRequestProxy.h"
 #include "RbmIndicationWrapper.h"
+#include "MmRequestProxy.h"
+#include "MmIndicationWrapper.h"
+#include "TimerRequestProxy.h"
+#include "TimerIndicationWrapper.h"
 
-extern RbmRequestProxy *device;
+extern RbmRequestProxy *rbmdevice;
+extern MmRequestProxy *mmdevice;
+extern TimerRequestProxy *timerdevice;
 extern sem_t mul_sem;
 
 class PortalMatAllocator : public cv::MatAllocator {
@@ -80,15 +86,34 @@ public:
   void sumOfErrorSquared(PortalMat &pred);
 };
 
+class MmIndication : public MmIndicationWrapper
+{
+public:
+ MmIndication(int id) : MmIndicationWrapper(id) {
+  }
+  virtual ~MmIndication() {}
+  virtual void mmfDone() {
+    //fprintf(stderr, "mmfDone\n");
+    sem_post(&mul_sem);
+  }
+};
+
+class TimerIndication : public TimerIndicationWrapper
+{
+public:
+ TimerIndication(int id) : TimerIndicationWrapper(id) {
+  }
+  virtual ~TimerIndication() {}
+  virtual void elapsedCycles(uint64_t cycles, uint64_t idleCycles) {
+    fprintf(stderr, "elapsedCycles %zd idle %zd idle %f\n", cycles, idleCycles, (double)idleCycles / (double)cycles);
+  }
+};
 class RbmIndication : public RbmIndicationWrapper
 {
 public:
  RbmIndication(int id) : RbmIndicationWrapper(id) {
   }
   virtual ~RbmIndication() {}
-  virtual void elapsedCycles(uint64_t cycles, uint64_t idleCycles) {
-    fprintf(stderr, "elapsedCycles %zd idle %zd idle %f\n", cycles, idleCycles, (double)idleCycles / (double)cycles);
-  }
   virtual void sigmoidDone() {
     fprintf(stderr, "sigmoidDone\n");
     sem_post(&mul_sem);
@@ -101,10 +126,6 @@ public:
   virtual void sigmoidTableSize(uint32_t size) {
     fprintf(stderr, "sigmoidTableSize %d\n", size);
     sigmoidTableSize_ = size;
-    sem_post(&mul_sem);
-  }
-  virtual void mmfDone() {
-    //fprintf(stderr, "mmfDone\n");
     sem_post(&mul_sem);
   }
   virtual void bramMmfDone() {

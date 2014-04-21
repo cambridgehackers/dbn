@@ -73,7 +73,7 @@ void RBM::train(int numVisible, int numHidden, const cv::Mat &trainingData)
   dma->show_mem_stats(ChannelType_Read);
   for (int epoch = 0; epoch < numEpochs; epoch++) {
 
-    device->startTimer();
+    timerdevice->startTimer();
     cv::Mat pos_hidden_activations = data * pmWeights;
 
     // fixme transpose
@@ -203,7 +203,7 @@ void RBM::train(int numVisible, int numHidden, const cv::Mat &trainingData)
     // error = np.sum((data - neg_visible_probs) ** 2)
     pmData.sumOfErrorSquared(pm_neg_visible_probs);
     fprintf(stderr, "completed epoch %d\n", epoch);
-    device->stopTimer();
+    timerdevice->stopTimer();
   }
   uint64_t total_cycles = lap_timer(0);
   uint64_t beats = dma->show_mem_stats(ChannelType_Read);

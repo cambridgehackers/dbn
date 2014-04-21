@@ -157,6 +157,8 @@ module [Module] mkSigmoid#(SigmoidTable#(tsz) sigmoidTable, PipeOut#(Float) in)(
    return toPipeOut(rfifo);
 endmodule
 
+typedef 2 N;
+
 interface DmaSigmoidIfc#(numeric type dsz);
    method Action start(ObjectPointer pointerA, ObjectPointer pointerB, UInt#(ObjectOffsetSize) numElts);
    method ActionValue#(Bool) finish();
@@ -164,22 +166,28 @@ interface DmaSigmoidIfc#(numeric type dsz);
    method Action updateSigmoidTable(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) numElts);
    method ActionValue#(Bool) sigmoidTableUpdated();
    method Bit#(32) tableSize();
+   
+   interface Vector#(2, ObjectReadClient#(dsz)) readClients;
    interface ObjectWriteClient#(dsz) dmaClient;
 endinterface
 
-module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
-			      VectorSource#(dmasz, Vector#(n,Float)) tableSource,
-			      function Module#(DmaVectorSink#(dsz, Vector#(n, Float))) mkSink(PipeOut#(Vector#(n, Float)) pipe_in)
-   )
-   (DmaSigmoidIfc#(dsz))
+(* synthesize *)
+module [Module] mkDmaSigmoid(DmaSigmoidIfc#(dsz))
    provisos (Bits#(Float, fsz)
-	     , Mul#(fsz,n,dmasz)
-	     , Add#(1, a__, n)
-	     , Add#(b__, n, 4)
-	     , Mul#(n, c__, 4)
-      );
+	     , Add#(N,0,n)
+	     , Mul#(fsz,N,dmasz)
+	     , Bits#(Vector#(2,Float), dsz)
+	     , PipeInOut#(Vector#(2,Float), FIFOF#(Vector#(2,Float)))
+	     , Mul#(dbytes, 8, dsz)
+	     , Div#(dsz, 8, dbytes)
+	     );
 
    Bool verbose = False;
+
+   DmaVectorSource#(dmasz, Vector#(n,Float)) dmasource <- mkDmaVectorSource();
+   DmaVectorSource#(dmasz, Vector#(n,Float)) dmatablesource <- mkDmaVectorSource();
+   VectorSource#(dmasz, Vector#(n,Float)) source = dmasource.vector;
+   VectorSource#(dmasz, Vector#(n,Float)) tableSource = dmatablesource.vector;
 
    Vector#(n, SigmoidTable#(6)) sigmoidTables <- replicateM(mkSigmoidTable);
    Vector#(n, Server#(Float,Float)) sigmoidServers;
@@ -228,7 +236,7 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
       dfifo.enq(vs);
    endrule
 
-   let sinkC <- mkSink(toPipeOut(dfifo));
+   DmaVectorSink#(TMul#(N,32),Vector#(N,Float)) sinkC <- mkDmaVectorSink(toPipeOut(dfifo));
 
    rule sourceFinishRule;
       let b <- source.finish();
@@ -264,6 +272,7 @@ module [Module] mkDmaSigmoid#(VectorSource#(dmasz, Vector#(n,Float)) source,
       return sigmoidTables[0].tableSize();
    endmethod
 
+   interface ObjectReadClient readClients = cons(dmasource.dmaClient, cons(dmatablesource.dmaClient, nil));
    interface ObjectWriteClient dmaClient = sinkC.dmaClient;
 
 endmodule

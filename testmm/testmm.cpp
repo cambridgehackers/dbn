@@ -21,8 +21,8 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <RbmRequestProxy.h>
-#include <RbmIndicationWrapper.h>
+#include <MmRequestProxy.h>
+#include <MmIndicationWrapper.h>
 #include <DmaConfigProxy.h>
 #include <GeneratedTypes.h>
 //#include <DmaIndicationWrapper.h>
@@ -38,7 +38,6 @@
 #include <math.h> // frexp(), fabs()
 #include <assert.h>
 #include "portalmat.h"
-#include "rbm.h"
 #include "mnist.h"
 
 static int verbose = 0;
@@ -46,8 +45,7 @@ static int verbose = 0;
 RbmRequestProxy *rbmdevice = 0;
 MmRequestProxy *mmdevice = 0;
 TimerRequestProxy *timerdevice = 0;
-class RbmIndication;
-RbmIndication *deviceIndication = 0;
+class MmIndication;
 MmIndication *mmdeviceIndication = 0;
 TimerIndication *timerdeviceIndication = 0;
 DmaConfigProxy *dma = 0;
@@ -72,7 +70,6 @@ void *dbgThread(void *)
     sleep(1);
     if (dma) {
       dma->getStateDbg(ChannelType_Read);
-      rbmdevice->dbg();
       sleep(5);
     }
   }
@@ -84,8 +81,6 @@ int main(int argc, const char **argv)
   unsigned int srcGen = 0;
 
   fprintf(stderr, "%s %s\n", __DATE__, __TIME__);
-  rbmdevice = new RbmRequestProxy(IfcNames_RbmRequestPortal);
-  deviceIndication = new RbmIndication(IfcNames_RbmIndicationPortal);
   mmdevice = new MmRequestProxy(IfcNames_MmRequestPortal);
   mmdeviceIndication = new MmIndication(IfcNames_MmIndicationPortal);
   timerdevice = new TimerRequestProxy(IfcNames_TimerRequestPortal);
@@ -115,34 +110,23 @@ int main(int argc, const char **argv)
 
   matAllocator = new PortalMatAllocator(dma);
 
-  configureSigmoidTable(rbmdevice, deviceIndication);
+  cv::Mat m1 = (cv::Mat_<float>(4,6) <<
+		1,2,3,4,5,
+		4,5,6,7,8,
+		7,8,9,10,11);
+  cv::Mat m2 = (cv::Mat_<float>(4,6) <<
+		11,12,13,14,15,
+		16,17,18,19,20,
+		21,22,23,24,25
+		);
+  PortalMat pm1(m1);
+  PortalMat pm2(m2);
+  PortalMat pm3;
+  dumpMat<float>("pm1", "%5.1f", pm1);
+  dumpMat<float>("pm2", "%5.1f", pm2);
+  pm3.multf(pm1, pm2);
+  dumpMat<float>("pm1 * pm2", "%5.1f", pm3);
 
-  if (1) {
-    cv::Mat m1 = (cv::Mat_<float>(4,6) <<
-		  1,2,3,4,5,6,
-		  4,5,6,7,8,9,
-		  7,8,9,10,11,12,
-		  10,11,12,13,14,15);
-    cv::Mat m2 = (cv::Mat_<float>(4,6) <<
-		  11,12,13,14,15,16,
-		  16,17,18,19,20,21,
-		  21,22,23,24,25,26,
-		  24,25,26,27,28,29);
-    PortalMat pm1(m1);
-    PortalMat pm2(m2);
-    PortalMat pm3;
-    dumpMat<float>("pm1", "%5.1f", pm1);
-    dumpMat<float>("pm2", "%5.1f", pm2);
-    pm3.sigmoid(pm1);
-    dumpMat<float>("sigmoid", "%5.1f", pm3);
-    pm3.multf(pm1, pm2);
-    pm3.multf(pm1, pm2);
-    dumpMat<float>("pm1 * pm2", "%5.1f", pm3);
-  } else {
-    RBM rbm(dma);
-    rbm.run();
-  }
-
-  rbmdevice->finish();
+  //device->finish();
   exit(0);
 }

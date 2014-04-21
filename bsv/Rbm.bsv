@@ -40,89 +40,11 @@ import Matrix::*;
 import Sigmoid::*;
 import FloatOps::*;
 import Pipe::*;
-
-// these typedefs are so we can have synthesizeable modules below
-typedef 2 N;
-typedef TMul#(32,N) DmaSz;
-
-interface RbmIndication;
-   method Action elapsedCycles(Bit#(64) cycles, Bit#(64) idleCycles);
-   method Action sigmoidDone();
-   method Action sigmoidTableSize(Bit#(32) size);
-   method Action sigmoidTableUpdated(Bit#(32) addr);
-   method Action mmfDone();
-   method Action bramMmfDone();
-   method Action toBramDone();
-   method Action fromBramDone();
-   method Action statesDone();
-   method Action statesDone2();
-   method Action updateWeightsDone();
-   method Action sumOfErrorSquared(Bit#(32) error);
-   method Action dbg(Bit#(32) a, Bit#(32) b, Bit#(32) c, Bit#(32) d);
-endinterface
-
-interface RbmRequest;
-   method Action sglist(Bit#(32) off, Bit#(40) addr, Bit#(32) len);
-   method Action paref(Bit#(32) addr, Bit#(32) len);
-
-   method Action startTimer();
-   method Action stopTimer();
-   method Action mmf(Bit#(32) inPointer1, Bit#(32) r1, Bit#(32) c1,
-		     Bit#(32) inPointer2, Bit#(32) r2, Bit#(32) c2,
-		     Bit#(32) outPointer);
-   method Action bramMmf(Bit#(32) inPointer1, Bit#(32) r1, Bit#(32) c1,
-			 Bit#(32) inPointer2, Bit#(32) r2, Bit#(32) c2,
-			 Bit#(32) outPointer);
-   method Action toBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts);
-   method Action fromBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts);
-
-    method Action sigmoid(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
-    method Action setSigmoidLimits(Bit#(32) rscale, Bit#(32) llimit, Bit#(32) ulimit);
-    method Action sigmoidTableSize();
-    method Action updateSigmoidTable(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) numElts);
-
-    method Action computeStates(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
-    method Action computeStates2(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) readPointer2, Bit#(32) readOffset2,
-				 Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
-
-    method Action updateWeights(Bit#(32) posAssociationsPointer, Bit#(32) negAssociationsPointer, Bit#(32) weightsPointer, Bit#(32) numElts, Bit#(32) learningRateOverNumExamples);
-
-    method Action sumOfErrorSquared(Bit#(32) dataPointer, Bit#(32) predPointer, Bit#(32) numElts);
-
-    method Action dbg(); 
-    method Action finish(); // for bsim only
-endinterface
+import Timer::*;
+import RbmTypes::*;
 
 function ObjectReadClient#(asz) getSourceReadClient(DmaVectorSource#(asz,a) s); return s.dmaClient; endfunction
 function ObjectWriteClient#(asz) getSinkWriteClient(DmaVectorSink#(asz,a) s); return s.dmaClient; endfunction
-
-interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
-   interface Vector#(TAdd#(N,1), ObjectReadClient#(dmasz)) readClients;
-   interface Vector#(1, ObjectWriteClient#(dmasz)) writeClients;
-   method Action start(ObjectPointer pointerA, UInt#(ObjectOffsetSize) numRowsA, UInt#(ObjectOffsetSize) numColumnsA,
-		       ObjectPointer pointerB, UInt#(ObjectOffsetSize) numRowsB, UInt#(ObjectOffsetSize) numColumnsB,
-		       ObjectPointer pointerC);
-   method ActionValue#(Bool) finish();
-   method Bit#(32) dbg();
-endinterface
-
-(* synthesize *)
-module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
-   Vector#(TAdd#(N,1), DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
-   Vector#(1, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = cons(vfsources[0].vector, nil);
-   Vector#(N, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = takeAt(1, map(dmaVectorSourceVector, vfsources));
-   DmaMatrixMultiplyIfc#(ObjectOffsetSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
-   interface Vector readClients = map(getSourceReadClient, vfsources);
-   interface Vector writeClients = cons(dmaMMF.dmaClient, nil);
-   method start = dmaMMF.start;
-   method finish = dmaMMF.finish;
-   method Bit#(32) dbg();
-      Bit#(32) d = 0;
-      d[0] = pack(vfsources[0].vector.pipe.notEmpty());
-      d[1] = pack(vfsources[1].vector.pipe.notEmpty());
-      return d;
-   endmethod
-endmodule
 
 interface DmaStatesPipe#(numeric type n, numeric type dmasz);
    interface Vector#(1, ObjectReadClient#(dmasz)) sources; 
@@ -335,12 +257,14 @@ module [Module] mkDmaSumOfErrorSquared(DmaSumOfErrorSquared#(N, DmaSz))
 endmodule
 
 interface Rbm#(numeric type n);
-   interface RbmRequest request;
+   interface RbmRequest rbmRequest;
+   interface MmRequest mmRequest;
+   interface TimerRequest timerRequest;
    interface Vector#(TAdd#(11,N), ObjectReadClient#(TMul#(32,n))) readClients;
    interface Vector#(5, ObjectWriteClient#(TMul#(32,n))) writeClients;
 endinterface
 
-module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
+module [Module] mkRbm#(RbmIndication rbmInd, MmIndication mmInd, TimerIndication timerInd)(Rbm#(N))
    provisos (Add#(1,a__,N),
 	     Add#(N,0,n),
 	     Mul#(N,32,DmaSz)
@@ -351,10 +275,8 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
    DramMatrixMultiply#(N, TMul#(N,32)) dmaMMF <- mkDramMatrixMultiply();
    //DramBramMatrixMultiply#(N, TMul#(N,32)) bramMMF <- mkDramBramMatrixMultiply();
 
-   Vector#(2, DmaVectorSource#(DmaSz, Vector#(N,Float))) sigmoidsources <- replicateM(mkDmaVectorSource());
-   DmaSigmoidIfc#(TMul#(32,n)) dmaSigmoid <- mkDmaSigmoid(sigmoidsources[0].vector,
-							  sigmoidsources[1].vector,
-							  mkDmaVectorSink);
+   DmaSigmoidIfc#(TMul#(32,n)) dmaSigmoid <- mkDmaSigmoid();
+   Vector#(2,ObjectReadClient#(TMul#(32,n))) sigmoidsources = dmaSigmoid.readClients;
 
    DmaStatesPipe#(N, DmaSz) dmaStates <- mkDmaStatesPipe();
    DmaStatesPipe2#(N, DmaSz) dmaStates2 <- mkDmaStatesPipe2();
@@ -367,60 +289,45 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
       $display("mmfDone");
       let d <- dmaMMF.finish();
       busyFifo.deq();
-      ind.mmfDone();
+      mmInd.mmfDone();
    endrule
-   // rule bramMmfDone;
-   //    let d <- bramMMF.finish();
-   //    busyFifo.deq();
-   //    ind.bramMmfDone();
-   // endrule
-   // rule toBramDone;
-   //    let d <- bramMMF.toBramDone();
-   //    busyFifo.deq();
-   //    ind.toBramDone();
-   // endrule
-   // rule fromBramDone;
-   //    let d <- bramMMF.fromBramDone();
-   //    busyFifo.deq();
-   //    ind.fromBramDone();
-   // endrule
    rule sigmoidDone;
       $display("sigmoidDone");
       let d <- dmaSigmoid.finish();
       busyFifo.deq();
-      ind.sigmoidDone();
+      rbmInd.sigmoidDone();
    endrule
    rule sigmoidTableUpdateDone;
       $display("sigmoidDone");
       let d <- dmaSigmoid.sigmoidTableUpdated();
       busyFifo.deq();
-      ind.sigmoidTableUpdated(0);
+      rbmInd.sigmoidTableUpdated(0);
    endrule
    rule dmaStatesDone;
       $display("dmaStatesDone");
       let b <- dmaStates.finish();
       busyFifo.deq();
-      ind.statesDone();
+      rbmInd.statesDone();
    endrule
    rule dmaStatesDone2;
       $display("dmaStatesDone2");
       let b <- dmaStates2.finish();
       busyFifo.deq();
-      ind.statesDone2();
+      rbmInd.statesDone2();
    endrule
 
    rule dmaUpdateWeightsDone;
       $display("dmaUpdateWeightsDone");
       let b <- dmaUpdateWeights.finish();
       busyFifo.deq();
-      ind.updateWeightsDone();
+      rbmInd.updateWeightsDone();
    endrule
 
    rule dmaSumOfErrorSquaredDone;
       $display("dmaSumOfErrorSquaredDone");
       dmaSumOfErrorSquared.pipe.deq();
       busyFifo.deq();
-      ind.sumOfErrorSquared(pack(dmaSumOfErrorSquared.pipe.first()));
+      rbmInd.sumOfErrorSquared(pack(dmaSumOfErrorSquared.pipe.first()));
    endrule
 
    FIFOF#(Bool) timerRunning <- mkFIFOF();
@@ -432,17 +339,19 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
 	 idleCount <= idleCount + 1;
    endrule
 
-   interface RbmRequest request;
-      method Action startTimer() if (!timerRunning.notEmpty());
+   interface TimerRequest timerRequest;
+         method Action startTimer() if (!timerRunning.notEmpty());
 	 cycleCount <= 0;
 	 idleCount <= 0;
 	 timerRunning.enq(True);
       endmethod
       method Action stopTimer();
 	 timerRunning.deq();
-	 ind.elapsedCycles(cycleCount, idleCount);
+	 timerInd.elapsedCycles(cycleCount, idleCount);
       endmethod
+   endinterface
 
+   interface MmRequest mmRequest;
       method Action mmf(Bit#(32) h1, Bit#(32) r1, Bit#(32) c1,
 			Bit#(32) h2, Bit#(32) r2, Bit#(32) c2,
 			Bit#(32) h3);
@@ -451,6 +360,9 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
 		      h3);
 	 busyFifo.enq(True);
       endmethod
+   endinterface
+   
+   interface RbmRequest rbmRequest;
       method Action bramMmf(Bit#(32) h1, Bit#(32) r1, Bit#(32) c1,
 			    Bit#(32) h2, Bit#(32) r2, Bit#(32) c2,
 			    Bit#(32) h3);
@@ -485,7 +397,7 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
 	 busyFifo.enq(True);
       endmethod
       method Action sigmoidTableSize();
-	 ind.sigmoidTableSize(dmaSigmoid.tableSize());
+	 rbmInd.sigmoidTableSize(dmaSigmoid.tableSize());
       endmethod
 
       method Action dbg();
@@ -535,7 +447,7 @@ module [Module] mkRbm#(RbmIndication ind)(Rbm#(N))
 						append(dmaUpdateWeights.readClients,
 						       dmaSumOfErrorSquared.readClients),
 						append(
-						   map(getSourceReadClient, sigmoidsources),
+						   sigmoidsources,
 						   append(
 						      dmaStates.sources,
 						      dmaStates2.sources)

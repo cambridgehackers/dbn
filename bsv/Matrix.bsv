@@ -31,6 +31,8 @@ import Dma::*;
 import FloatingPoint::*;
 import Pipe::*;
 import FloatOps::*;
+import Timer::*;
+import RbmTypes::*;
 
 module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,Float)) ypipe, UInt#(nwidth) numElts)(PipeOut#(Float))
    provisos (
@@ -63,7 +65,7 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
 	 if (verbose) $display($format(fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y) + fshow(" accum=")+fshow(pack(accum))));
          macs[i].request.put(tuple4(accum, x[i], y[i], defaultValue));
 	 if (i == 0) begin
-	    let c = countInReg + 1;
+	    let c = countInReg + fromInteger(valueOf(n));
 	    if (c == numElts)
 	       c = 0;
 	    countInReg <= c;
@@ -73,7 +75,7 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
 
    rule macout;
       Vector#(n,Float) vs = unpack(0);
-      let c = countOutReg + 1;
+      let c = countOutReg + fromInteger(valueOf(n));
       for (Integer i = 0; i < valueOf(n); i = i + 1) begin
 	 let resp <- macs[i].response.get();
 	 vs[i] = tpl_1(resp);
@@ -266,7 +268,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
       // each time we write a burst of k values via sinkC
       let b <- sinkC.vector.finish();
       let c = dpCount-fromInteger(k);
-      $display("sinkDone c=%d", c);
+      $display("sinkDone c=%d k=%d", c, k);
       dpCount <= c;
       if (c == 0) begin
 	 running <= False;
@@ -296,4 +298,94 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
    endmethod
 
    interface ObjectWriteClient dmaClient = sinkC.dmaClient;
+endmodule
+
+interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
+   interface Vector#(TAdd#(N,1), ObjectReadClient#(dmasz)) readClients;
+   interface Vector#(1, ObjectWriteClient#(dmasz)) writeClients;
+   method Action start(ObjectPointer pointerA, UInt#(ObjectOffsetSize) numRowsA, UInt#(ObjectOffsetSize) numColumnsA,
+		       ObjectPointer pointerB, UInt#(ObjectOffsetSize) numRowsB, UInt#(ObjectOffsetSize) numColumnsB,
+		       ObjectPointer pointerC);
+   method ActionValue#(Bool) finish();
+   method Bit#(32) dbg();
+endinterface
+
+(* synthesize *)
+module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
+   Vector#(TAdd#(N,1), DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
+   Vector#(1, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = cons(vfsources[0].vector, nil);
+   Vector#(N, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = takeAt(1, map(dmaVectorSourceVector, vfsources));
+   DmaMatrixMultiplyIfc#(ObjectOffsetSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
+   interface Vector readClients = map(getSourceReadClient, vfsources);
+   interface Vector writeClients = cons(dmaMMF.dmaClient, nil);
+   method start = dmaMMF.start;
+   method finish = dmaMMF.finish;
+   method Bit#(32) dbg();
+      Bit#(32) d = 0;
+      d[0] = pack(vfsources[0].vector.pipe.notEmpty());
+      d[1] = pack(vfsources[1].vector.pipe.notEmpty());
+      return d;
+   endmethod
+endmodule
+
+interface Mm#(numeric type n);
+   interface MmRequest mmRequest;
+   interface TimerRequest timerRequest;
+   interface Vector#(TAdd#(1,N), ObjectReadClient#(TMul#(32,N))) readClients;
+   interface Vector#(1, ObjectWriteClient#(TMul#(32,n))) writeClients;
+endinterface
+
+module [Module] mkMm#(MmIndication ind, TimerIndication timerInd)(Mm#(N))
+   provisos (Add#(1,a__,N),
+	     Add#(N,0,n),
+	     Mul#(N,32,DmaSz)
+      );
+
+   let n = valueOf(n);
+
+   DramMatrixMultiply#(N, TMul#(N,32)) dmaMMF <- mkDramMatrixMultiply();
+
+   FIFOF#(Bool) busyFifo <- mkFIFOF();
+   rule mmfDone;
+      $display("mmfDone");
+      let d <- dmaMMF.finish();
+      busyFifo.deq();
+      ind.mmfDone();
+   endrule
+
+   FIFOF#(Bool) timerRunning <- mkFIFOF();
+   Reg#(Bit#(64)) cycleCount <- mkReg(0);
+   Reg#(Bit#(64)) idleCount <- mkReg(0);
+   rule countCycles if (timerRunning.notEmpty());
+      cycleCount <= cycleCount + 1;
+      if (!busyFifo.notEmpty())
+	 idleCount <= idleCount + 1;
+   endrule
+
+   interface TimerRequest timerRequest;
+         method Action startTimer() if (!timerRunning.notEmpty());
+	 cycleCount <= 0;
+	 idleCount <= 0;
+	 timerRunning.enq(True);
+      endmethod
+      method Action stopTimer();
+	 timerRunning.deq();
+	 timerInd.elapsedCycles(cycleCount, idleCount);
+      endmethod
+   endinterface
+
+   interface MmRequest mmRequest;
+      method Action mmf(Bit#(32) h1, Bit#(32) r1, Bit#(32) c1,
+			Bit#(32) h2, Bit#(32) r2, Bit#(32) c2,
+			Bit#(32) h3);
+	 dmaMMF.start(h1, unpack(extend(r1)), unpack(extend(c1)),
+		      h2, unpack(extend(r2)), unpack(extend(c2)),
+		      h3);
+	 busyFifo.enq(True);
+      endmethod
+   endinterface   
+
+   interface Vector readClients = dmaMMF.readClients;
+   interface Vector writeClients =  dmaMMF.writeClients;
+
 endmodule

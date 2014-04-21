@@ -227,17 +227,9 @@ void PortalMat::multf(PortalMat &a, PortalMat &b_transpose)
 	    a.reference(), a.rows, a.cols,
 	    b_transpose.reference(), b_transpose.rows, b_transpose.cols);
     fprintf(stderr, "device->mmf\n");
-    if (0) {
-	device->toBram(0, b_transpose.reference(), 0, b_transpose.rows * b_transpose.cols);
-	sem_wait(&mul_sem);
-	device->bramMmf(a.reference(), a.rows, a.cols,
-			0, b_transpose.rows, b_transpose.cols,
-			reference());
-    } else {
-	device->mmf(a.reference(), a.rows, a.cols,
-		    b_transpose.reference(), b_transpose.rows, b_transpose.cols,
-		    reference());
-    }
+    mmdevice->mmf(a.reference(), a.rows, a.cols,
+		  b_transpose.reference(), b_transpose.rows, b_transpose.cols,
+		  reference());
     sem_wait(&mul_sem);
 }
 
@@ -246,8 +238,8 @@ void PortalMat::sigmoid(PortalMat &a)
     create(a.rows, a.cols, CV_32F);
     fprintf(stderr, "sigmoid: a.ref=%d a.rows=%d a.cols=%d\n", a.reference(), a.rows, a.cols);
     reference();
-    //fprintf(stderr, "device->sigmoid\n");
-    device->sigmoid(a.reference(), 0, reference(), 0, a.rows*a.cols);
+    //fprintf(stderr, "rbmdevice->sigmoid\n");
+    rbmdevice->sigmoid(a.reference(), 0, reference(), 0, a.rows*a.cols);
     sem_wait(&mul_sem);
 }
 
@@ -256,8 +248,8 @@ void PortalMat::hiddenStates(PortalMat &a)
     create(a.rows, a.cols, CV_32F);
     fprintf(stderr, "hiddenStates: a.ref=%d a.rows=%d a.cols=%d\n", a.reference(), a.rows, a.cols);
     reference();
-    //fprintf(stderr, "device->computeStates\n");
-    device->computeStates(a.reference(), 0, reference(), 0, a.rows*a.cols);
+    //fprintf(stderr, "rbmdevice->computeStates\n");
+    rbmdevice->computeStates(a.reference(), 0, reference(), 0, a.rows*a.cols);
     sem_wait(&mul_sem);
 }
 
@@ -267,16 +259,16 @@ void PortalMat::hiddenStates2(PortalMat &a, PortalMat &rand)
     fprintf(stderr, "hiddenStates2: a.ref=%d a.rows=%d a.cols=%d\n", a.reference(), a.rows, a.cols);
     rand.reference();
     reference();
-    //fprintf(stderr, "device->computeStates2 ptr=%d randPtr=%d\n", a.reference(), rand.reference());
-    device->computeStates2(a.reference(), 0, rand.reference(), 0, reference(), 0, a.rows*a.cols);
+    //fprintf(stderr, "rbmdevice->computeStates2 ptr=%d randPtr=%d\n", a.reference(), rand.reference());
+    rbmdevice->computeStates2(a.reference(), 0, rand.reference(), 0, reference(), 0, a.rows*a.cols);
     sem_wait(&mul_sem);
 }
 
 // weights += learningRate * (pos_associations - neg_associations) / num_examples;
 void PortalMat::updateWeights(PortalMat &posAssociations, PortalMat &negAssociations, float learningRateOverNumExamples)
 {
-    fprintf(stderr, "device->updateWeights pa.ref=%d na.ref=%d\n", posAssociations.reference(), negAssociations.reference());
-    device->updateWeights(posAssociations.reference(), negAssociations.reference(), reference(), rows*cols, *(int*)&learningRateOverNumExamples);
+    fprintf(stderr, "rbmdevice->updateWeights pa.ref=%d na.ref=%d\n", posAssociations.reference(), negAssociations.reference());
+    rbmdevice->updateWeights(posAssociations.reference(), negAssociations.reference(), reference(), rows*cols, *(int*)&learningRateOverNumExamples);
     sem_wait(&mul_sem);
 }
 
@@ -287,7 +279,7 @@ void PortalMat::sumOfErrorSquared(PortalMat &pred)
 		rows, cols, pred.rows, pred.cols);
 	return;
     }
-    device->sumOfErrorSquared(reference(), pred.reference(), rows*cols);
+    rbmdevice->sumOfErrorSquared(reference(), pred.reference(), rows*cols);
     sem_wait(&mul_sem);
 }
 
@@ -302,7 +294,7 @@ float sigmoid(float x)
 
 void configureSigmoidTable(RbmRequestProxy *device, RbmIndication *indication)
 {
-  device->sigmoidTableSize();
+  rbmdevice->sigmoidTableSize();
   sem_wait(&mul_sem);
 
   int num_entries = indication->sigmoidTableSize();
@@ -326,7 +318,7 @@ void configureSigmoidTable(RbmRequestProxy *device, RbmIndication *indication)
   float fxulimit = (float)-lowest_angle;
   fprintf(stderr, "configureSigmoidTable num_entries=%d rscale=%f %x llimit=%f %x rlimit=%f %x\n",
 	  num_entries, fxscale, *(int*)&fxscale, fxllimit, *(int*)&fxllimit, fxulimit, *(int*)&fxulimit);
-  device->setSigmoidLimits(*(int*)&fxscale, *(int*)&fxllimit, *(int*)&fxulimit);
+  rbmdevice->setSigmoidLimits(*(int*)&fxscale, *(int*)&fxllimit, *(int*)&fxulimit);
 
   int incr = 1;
   fprintf(stderr, "filling sigmoid table pointer=%x\n", sigmoidTable.reference());
@@ -351,7 +343,7 @@ void configureSigmoidTable(RbmRequestProxy *device, RbmIndication *indication)
     sigmoidTable.at<float>(0, 4*ai+3) = 0;
   }
   fprintf(stderr, "updating sigmoid table pointer=%x\n", sigmoidTable.reference());
-  device->updateSigmoidTable(sigmoidTable.reference(), 0, num_entries);
+  rbmdevice->updateSigmoidTable(sigmoidTable.reference(), 0, num_entries);
   sem_wait(&mul_sem);
   fprintf(stderr, "sigmoid table updated\n");
 }
