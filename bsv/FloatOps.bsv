@@ -57,6 +57,7 @@ module mkFloatMultiplier(FloatServer2#(Float));
    endinterface
 endmodule
 
+(* synthesize *)
 module mkFloatMac(Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception)));
    let mac <- mkFloatingPointFusedMultiplyAccumulate();
    return mac;
