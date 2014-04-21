@@ -49,7 +49,7 @@ DmaConfigProxy *dma = 0;
 DmaIndicationWrapper *dmaIndication = 0;
 MmIndication *mmdeviceIndication = 0;
 MmRequestProxy *mmdevice = 0;
-SigmoidIndication *sigmoidIndication = 0;
+SigmoidIndication *sigmoidindication = 0;
 SigmoidRequestProxy *sigmoiddevice = 0;
 RbmIndication *deviceIndication = 0;
 RbmRequestProxy *rbmdevice = 0;
@@ -92,7 +92,7 @@ int main(int argc, const char **argv)
   mmdevice = new MmRequestProxy(IfcNames_MmRequestPortal);
   mmdeviceIndication = new MmIndication(IfcNames_MmIndicationPortal);
   sigmoiddevice = new SigmoidRequestProxy(IfcNames_SigmoidRequestPortal);
-  sigmoidIndication = new SigmoidIndication(IfcNames_SigmoidIndicationPortal);
+  sigmoidindication = new SigmoidIndication(IfcNames_SigmoidIndicationPortal);
   timerdevice = new TimerRequestProxy(IfcNames_TimerRequestPortal);
   timerdeviceIndication = new TimerIndication(IfcNames_TimerIndicationPortal);
 
