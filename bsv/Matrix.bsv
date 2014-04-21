@@ -42,54 +42,62 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
 
    Bool verbose = False;
 
-   PipeOut#(Tuple2#(Vector#(n,Float),Vector#(n,Float))) xypipe <- mkJoin(tuple2, xpipe, ypipe);
+   Reg#(UInt#(nwidth)) countInReg <- mkReg(0);
+   FIFOF#(Tuple3#(Bool,Vector#(n,Float),Vector#(n,Float))) xyfifo <- mkFIFOF();
+   FIFOF#(Bool) lastFifo <- mkFIFOF();
+   PipeOut#(Tuple3#(Bool, Vector#(n,Float),Vector#(n,Float))) xypipe = toPipeOut(xyfifo);
+   rule xyin;
+      Bool isFirst = (countInReg == 0);
+      UInt#(nwidth) n = fromInteger(valueOf(n));
+      let c = countInReg+n;
+      Bool isLast = (c >= numElts);
+      if (isLast)
+	 c = 0;
+      countInReg <= c;
+      xpipe.deq();
+      ypipe.deq();
+      xyfifo.enq(tuple3(isFirst,xpipe.first(), ypipe.first()));
+      lastFifo.enq(isLast);
+   endrule
 
    Vector#(n, Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac);
    Vector#(n, FIFO#(Maybe#(Float))) accumFifo <- replicateM(mkFIFO());
-   Reg#(UInt#(nwidth)) countInReg <- mkReg(0);
-   Reg#(UInt#(nwidth)) countOutReg <- mkReg(0);
    FIFOF#(Vector#(n,Float)) resultFifo <- mkFIFOF();
 
    rule mul;
       let v = xypipe.first;
       xypipe.deq;
-      let x = tpl_1(v);
-      let y = tpl_2(v);
+      let isFirst = tpl_1(v);
+      let x = tpl_2(v);
+      let y = tpl_3(v);
 
       for (Integer i = 0; i < valueOf(n); i = i + 1) begin
 	 Maybe#(Float) accum = tagged Invalid;
-	 if (countInReg > 0) begin
+	 if (!isFirst) begin
 	    accum = accumFifo[i].first();
 	    accumFifo[i].deq();
 	 end
 	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y) + fshow(" accum=")+fshow(pack(accum))));
          macs[i].request.put(tuple4(accum, x[i], y[i], defaultValue));
-	 if (i == 0) begin
-	    let c = countInReg + fromInteger(valueOf(n));
-	    if (c >= numElts)
-	       c = 0;
-	    countInReg <= c;
-	 end
       end
    endrule
 
    rule macout;
       Vector#(n,Float) vs = unpack(0);
-      let c = countOutReg + fromInteger(valueOf(n));
+      let isLast = lastFifo.first();
+      lastFifo.deq();
       for (Integer i = 0; i < valueOf(n); i = i + 1) begin
 	 let resp <- macs[i].response.get();
 	 vs[i] = tpl_1(resp);
-	 if (c < numElts) begin
+	 if (!isLast) begin
 	    accumFifo[i].enq(tagged Valid tpl_1(resp));
 	 end
       end
-      if (c >= numElts) begin
+      if (isLast) begin
 	 Vector#(n,Bit#(32)) ivs = unpack(pack(vs));
 	 resultFifo.enq(vs);
-	 c = 0;
-	 if (verbose) $display(fshow("label=")+fshow(label)+fshow(" countOutReg=")+fshow(countOutReg)+fshow(" numElts=")+fshow(numElts)+fshow(" mul=") + fshow(ivs));
+	 if (verbose) $display(fshow("label=")+fshow(label)+fshow(" isLast=")+fshow(isLast)+fshow(" numElts=")+fshow(numElts)+fshow(" mul=") + fshow(ivs));
       end
-      countOutReg <= c;
    endrule
 
    PipeOut#(Vector#(n,Float)) resultPipe = toPipeOut(resultFifo);
