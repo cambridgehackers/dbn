@@ -188,11 +188,13 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 				     )(DmaMatrixMultiplyIfc#(addrwidth, dsz))
    provisos (Add#(a__,ObjectOffsetSize,addrwidth)
 	     , Add#(N,0,n)
+	     , Log#(N,nshift)
 	     , FShow#(Float)
 	     , Arith#(Float)
 	     , Bits#(Vector#(N, Float), dsz));
 
    let n = valueOf(n);
+   let nshift = valueOf(nshift);
    Bool verbose = True;
 
    Reg#(Bool) doneReg <- mkReg(False);
@@ -213,7 +215,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 
    XYRangePipeIfc#(UInt#(addrwidth)) xypipeifc <- mkXYRangePipeOut();
 
-   Vector#(TAdd#(n,1), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) xypipes <- mkForkVector(xypipeifc.pipe);
+   Vector#(TAdd#(n,2), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) xypipes <- mkForkVector(xypipeifc.pipe);
 
    Reg#(Bool) running <- mkReg(False);
    FIFOF#(Bool) doneFifo <- mkFIFOF();
@@ -240,15 +242,15 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 				       +fshow(" startC=")+fshow(startC)));
 
 	  if (i == 0) begin
-	     sourceA[0].start(descriptorA.pointer, pack(truncate(startA)), pack(truncate(descriptorA.numColumns)));
+	     sourceA[0].start(descriptorA.pointer, pack(truncate(startA>>nshift)), pack(truncate(descriptorA.numColumns>>nshift)));
 	     $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
 	  end
-	 sourceB[i].start(descriptorB.pointer, pack(truncate(startB)), pack(truncate(descriptorB.numColumns)));
+	 sourceB[i].start(descriptorB.pointer, pack(truncate(startB>>nshift)), pack(truncate(descriptorB.numColumns>>nshift)));
 	 UInt#(TLog#(n)) in = fromInteger(i);
 	 Bit#(TAdd#(1,TLog#(n))) nn = fromInteger(n);
 	 $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
 	  if (i == 0)
-	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC)), extend(nn));
+	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC>>nshift)), 1);
        endrule
        if (i == 0)
 	  rule finishSourceA;
@@ -279,9 +281,11 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 
    rule sinkDone;
       // each time we write a burst of k values via sinkC
+      let xy = xypipes[n+1].first;
+      xypipes[n+1].deq;
       let b <- sinkC.vector.finish();
       let c = dotprodCount-fromInteger(n);
-      $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)));
+      $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)+fshow("    xy=")+fshow(xy)));
       dotprodCount <= c;
       if (c == 0) begin
 	 running <= False;
