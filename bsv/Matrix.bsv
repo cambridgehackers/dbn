@@ -34,13 +34,13 @@ import FloatOps::*;
 import Timer::*;
 import RbmTypes::*;
 
-module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,Float)) ypipe, UInt#(nwidth) numElts)(PipeOut#(Float))
+module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,Float)) ypipe, UInt#(nwidth) numElts, UInt#(TLog#(n)) label)(PipeOut#(Float))
    provisos (
       Add#(1,a__,n),
       ReducePipe#(n,Float)
       );
 
-   Bool verbose = True;
+   Bool verbose = False;
 
    PipeOut#(Tuple2#(Vector#(n,Float),Vector#(n,Float))) xypipe <- mkJoin(tuple2, xpipe, ypipe);
 
@@ -62,11 +62,11 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
 	    accum = accumFifo[i].first();
 	    accumFifo[i].deq();
 	 end
-	 if (verbose) $display($format(fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y) + fshow(" accum=")+fshow(pack(accum))));
+	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y) + fshow(" accum=")+fshow(pack(accum))));
          macs[i].request.put(tuple4(accum, x[i], y[i], defaultValue));
 	 if (i == 0) begin
 	    let c = countInReg + fromInteger(valueOf(n));
-	    if (c == numElts)
+	    if (c >= numElts)
 	       c = 0;
 	    countInReg <= c;
 	 end
@@ -83,17 +83,22 @@ module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,
 	    accumFifo[i].enq(tagged Valid tpl_1(resp));
 	 end
       end
-      Vector#(n,Bit#(32)) ivs = unpack(pack(vs));
-      resultFifo.enq(vs);
-
-      if (c == numElts)
+      if (c >= numElts) begin
+	 Vector#(n,Bit#(32)) ivs = unpack(pack(vs));
+	 resultFifo.enq(vs);
 	 c = 0;
+	 if (verbose) $display(fshow("label=")+fshow(label)+fshow(" countOutReg=")+fshow(countOutReg)+fshow(" numElts=")+fshow(numElts)+fshow(" mul=") + fshow(ivs));
+      end
       countOutReg <= c;
-      if (verbose) $display(fshow("countOutReg=")+fshow(countOutReg)+fshow(" numElts=")+fshow(numElts)+fshow(" mul=") + fshow(ivs));
    endrule
 
    PipeOut#(Vector#(n,Float)) resultPipe = toPipeOut(resultFifo);
    PipeOut#(Float) dotpipe <- mkReducePipe(mkFloatAddPipe, resultPipe);
+   PipeOut#(Float) displaydotpipe = (interface PipeOut#(Float);
+      method Float first(); return dotpipe.first(); endmethod
+      method Action deq(); $display(fshow("label=")+fshow(label)+fshow(" dotpipe=")+fshow(dotpipe.first())); dotpipe.deq(); endmethod
+      method Bool notEmpty(); return dotpipe.notEmpty(); endmethod
+      endinterface);
    return dotpipe;
 endmodule
 
@@ -142,6 +147,7 @@ module mkXYRangePipeOut(XYRangePipeIfc#(a)) provisos (Arith#(a), Bits#(a,awidth)
       endmethod
    endinterface
    method Action start(XYRangeConfig#(a) cfg) if (x >= xlimit);
+      $display("XYRangePipe x=%d xlimit=%d xstep=%d y=%d ylimit=%d ystep=%d", cfg.xbase, cfg.xlimit, cfg.xstep, cfg.ybase, cfg.ylimit, cfg.ystep);
       x <= cfg.xbase;
       y <= cfg.ybase;
       xbase <= cfg.xbase;
@@ -152,7 +158,7 @@ module mkXYRangePipeOut(XYRangePipeIfc#(a)) provisos (Arith#(a), Bits#(a,awidth)
       ylimit <= cfg.ylimit;
    endmethod
    method Action display();
-   	 $display("XYRangePipe x=%d xlimit=%d y=%d ylimit=%d", x, xlimit, y, ylimit);
+      $display("XYRangePipe x=%d xlimit=%d y=%d ylimit=%d xstep=%d ystep=%d", x, xlimit, xstep, y, ylimit, ystep);
    endmethod
 endmodule: mkXYRangePipeOut
 
@@ -179,30 +185,28 @@ typedef enum {
 typedef 2 N;
 
 module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Float))) sourceA,
-				     Vector#(k, VectorSource#(dsz, Vector#(N, Float))) sourceB,
+				     Vector#(N, VectorSource#(dsz, Vector#(N, Float))) sourceB,
 				     function Module#(DmaVectorSink#(dsz, Vector#(N, Float))) mkSink(PipeOut#(Vector#(N, Float)) pipe_in)
 				     )(DmaMatrixMultiplyIfc#(addrwidth, dsz))
    provisos (Add#(a__,ObjectOffsetSize,addrwidth)
 	     , Add#(N,0,n)
-	     , Add#(N,0,k)
 	     , FShow#(Float)
 	     , Arith#(Float)
 	     , Bits#(Vector#(N, Float), dsz));
 
    let n = valueOf(n);
-   let k = valueOf(k);
    Bool verbose = True;
 
    Reg#(Bool) doneReg <- mkReg(False);
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorA <- mkReg(unpack(0));
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorB <- mkReg(unpack(0));
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorC <- mkReg(unpack(0));
-   Reg#(UInt#(addrwidth)) dpCount <- mkReg(0);
+   Reg#(UInt#(addrwidth)) dotprodCount <- mkReg(0);
 
-   Vector#(k, PipeOut#(Vector#(N,Float))) aPipes <- mkForkVector(sourceA[0].pipe);
+   Vector#(n, PipeOut#(Vector#(N,Float))) aPipes <- mkForkVector(sourceA[0].pipe);
 
    function Module#(PipeOut#(Float)) mkFxDotProd(Integer i);
-      return mkDotProd(aPipes[i], sourceB[i].pipe, descriptorA.numColumns/fromInteger(n));
+      return mkDotProd(aPipes[i], sourceB[i].pipe, descriptorA.numColumns, fromInteger(i));
    endfunction
    Vector#(n, PipeOut#(Float)) fxdotprods <- genWithM(mkFxDotProd);
 
@@ -216,7 +220,12 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
    Reg#(Bool) running <- mkReg(False);
    FIFOF#(Bool) doneFifo <- mkFIFOF();
 
-   for (Integer i = 0; i < k; i = i + 1) begin
+   Reg#(UInt#(32)) cycles <- mkReg(0);
+   rule countCycles;
+      cycles <= cycles+1;
+   endrule
+
+   for (Integer i = 0; i < n; i = i + 1) begin
       rule startDotProd;
 	  Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[i].first;
 	  xypipes[i].deq();
@@ -224,27 +233,31 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 	  let row = tpl_1(xy);
 	  let col = tpl_2(xy)+fromInteger(i);
 
-	 if (verbose) $display($format(fshow("startDotProd xy=")+fshow(tuple2(row,col))+fshow(" acols=")+fshow(descriptorA.numColumns)+fshow(" bcols=")+fshow(descriptorB.numColumns)));
-	  let startA = row*descriptorA.numColumns/fromInteger(n); // row major
-	  let startB = col*descriptorB.numColumns/fromInteger(n); // col major layout (pre-transposed)
-	  let startC = (row*descriptorC.numColumns + col) / fromInteger(n); // row major
-	  if (verbose) $display($format(fshow("startDotProd xy=")+fshow(tuple2(row,col))
-					+fshow(" colsC=")+fshow(descriptorC.numColumns)
-					+fshow(" startC=")+fshow(startC)));
+	  let startA = row*descriptorA.numColumns; // row major
+	  let startB = col*descriptorB.numColumns; // col major layout (pre-transposed)
+	  let startC = row*descriptorC.numColumns + col; // row major
+	 if (verbose) $display($format(fshow(cycles)+fshow("    startDotProd xy=")+fshow(tuple2(row,col))
+				       +fshow(" startA=")+fshow(startA)
+				       +fshow(" startB=")+fshow(startB)
+				       +fshow(" startC=")+fshow(startC)));
 
+	  if (i == 0) begin
+	     sourceA[0].start(descriptorA.pointer, pack(truncate(startA)), pack(truncate(startA + descriptorA.numColumns)));
+	     $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
+	  end
+	 sourceB[i].start(descriptorB.pointer, pack(truncate(startB)), pack(truncate(startB + descriptorB.numColumns)));
+	 $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
 	  if (i == 0)
-	     sourceA[0].start(descriptorA.pointer, pack(truncate(startA)), pack(truncate(startA + descriptorA.numColumns/fromInteger(n))));
-	  sourceB[i].start(descriptorB.pointer, pack(truncate(startB)), pack(truncate(startB + descriptorB.numColumns/fromInteger(n))));
-	  if (i == 0)
-	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC)), pack(truncate(startC + fromInteger(k))));
+	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC)), pack(truncate(startC + fromInteger(n))));
        endrule
        if (i == 0)
 	  rule finishSourceA;
-	     //$display($format(fshow("sourceA[0].finish ")+sourceA[0].dbg()));
+	     $display($format(fshow(cycles)+fshow("    sourceA[0].finish ")));
 	     let b <- sourceA[0].finish();
 	  endrule
       rule finishSourceB;
-	 $display("sourceB[%d].finish", i);
+	 UInt#(TLog#(n)) in = fromInteger(i);
+	 $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].finish")));
 	 let b <- sourceB[i].finish();
       endrule
       
@@ -254,11 +267,11 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
       Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[n].first;
       xypipes[n].deq;
       Vector#(N,Float) vs;
-      for (Integer i = 0; i < k; i = i + 1) begin
+      for (Integer i = 0; i < n; i = i + 1) begin
 	 let v = fxdotprods[i].first;
 	 fxdotprods[i].deq;
 	 let xyi = tuple2(tpl_1(xy), tpl_2(xy)+fromInteger(i));
-	 if (verbose) $display($format(fshow("dotprodvalue xy=")+fshow(xyi)+fshow(" dotprod=")+fshow(v)));
+	 if (verbose) $display($format(fshow(cycles)+fshow("    dotprodvalue xy=")+fshow(xyi)+fshow(" dotprod=")+fshow(v)));
 	 vs[i] = v;
       end
       dfifo.enq(vs);
@@ -267,9 +280,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
    rule sinkDone;
       // each time we write a burst of k values via sinkC
       let b <- sinkC.vector.finish();
-      let c = dpCount-fromInteger(k);
-      $display("sinkDone c=%d k=%d", c, k);
-      dpCount <= c;
+      let c = dotprodCount-fromInteger(n);
+      $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)));
+      dotprodCount <= c;
       if (c == 0) begin
 	 running <= False;
 	 doneFifo.enq(?);
@@ -278,16 +291,16 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 
    method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
-		       ObjectPointer pointerC) if (dpCount == 0);
+		       ObjectPointer pointerC) if (dotprodCount == 0);
       XYRangeConfig#(UInt#(addrwidth)) xycfg = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: 1,
 							      ybase: 0, ylimit: numRowsB, ystep: fromInteger(n) };
       descriptorA <= MatrixDescriptor { pointer: pointerA, base: 0, numRows: numRowsA, numColumns: numColumnsA};
       descriptorB <= MatrixDescriptor { pointer: pointerB, base: 0, numRows: numRowsB, numColumns: numColumnsB};
       descriptorC <= MatrixDescriptor { pointer: pointerC, base: 0, numRows: numRowsA, numColumns: numRowsB};
-      dpCount <= numRowsA*numRowsB;
+      dotprodCount <= numRowsA*numRowsB;
 
       $display("mm pointerA=%d pointerB=%d pointerC=%d\n", pointerA, pointerB, pointerC);
-      if (verbose) $display("mm.start ra=%d ca=%d rb=%d cb=%d dpCount=%d", numRowsA, numColumnsA, numRowsB, numColumnsB, dpCount);
+      if (verbose) $display("mm.start ra=%d ca=%d rb=%d cb=%d dotprodCount=%d", numRowsA, numColumnsA, numRowsB, numColumnsB, dotprodCount);
       if (verbose) $display($format(fshow("mm.start ")+fshow(xycfg)));
       xypipeifc.start(xycfg);
    endmethod
