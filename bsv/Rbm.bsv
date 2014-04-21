@@ -362,6 +362,27 @@ module [Module] mkRbm#(RbmIndication rbmInd, MmIndication mmInd, SigmoidIndicati
       endmethod
    endinterface
    
+   interface SigmoidRequest sigmoidRequest;
+      method Action sigmoid(Bit#(32) readPointer, Bit#(32) readOffset,
+			    Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
+	 dmaSigmoid.start(readPointer, writePointer, unpack(extend(numElts)));
+	 busyFifo.enq(True);
+      endmethod
+      method Action setSigmoidLimits(Bit#(32) rscale, Bit#(32) llimit, Bit#(32) ulimit);
+	 $display("rbm.setSigmoidLimits");
+	 dmaSigmoid.setSigmoidLimits(unpack(rscale), unpack(llimit), unpack(ulimit));
+	 busyFifo.enq(True);
+      endmethod
+      method Action updateSigmoidTable(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) numElts);
+	 $display("rbm.updateSigmoidTable pointer=%x addr=%h numElts=%d", readPointer, readOffset, numElts);
+	 dmaSigmoid.updateSigmoidTable(readPointer, extend(readOffset), extend(numElts));
+	 busyFifo.enq(True);
+      endmethod
+      method Action sigmoidTableSize();
+	 sigmoidInd.sigmoidTableSize(dmaSigmoid.tableSize());
+      endmethod
+   endinterface   
+
    interface RbmRequest rbmRequest;
       method Action bramMmf(Bit#(32) h1, Bit#(32) r1, Bit#(32) c1,
 			    Bit#(32) h2, Bit#(32) r2, Bit#(32) c2,
@@ -381,24 +402,6 @@ module [Module] mkRbm#(RbmIndication rbmInd, MmIndication mmInd, SigmoidIndicati
 	 // busyFifo.enq(True);
       endmethod
 
-      method Action sigmoid(Bit#(32) readPointer, Bit#(32) readOffset,
-			    Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
-	 dmaSigmoid.start(readPointer, writePointer, unpack(extend(numElts)));
-	 busyFifo.enq(True);
-      endmethod
-      method Action setSigmoidLimits(Bit#(32) rscale, Bit#(32) llimit, Bit#(32) ulimit);
-	 $display("rbm.setSigmoidLimits");
-	 dmaSigmoid.setSigmoidLimits(unpack(rscale), unpack(llimit), unpack(ulimit));
-	 busyFifo.enq(True);
-      endmethod
-      method Action updateSigmoidTable(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) numElts);
-	 $display("rbm.updateSigmoidTable pointer=%x addr=%h numElts=%d", readPointer, readOffset, numElts);
-	 dmaSigmoid.updateSigmoidTable(readPointer, extend(readOffset), extend(numElts));
-	 busyFifo.enq(True);
-      endmethod
-      method Action sigmoidTableSize();
-	 sigmoidInd.sigmoidTableSize(dmaSigmoid.tableSize());
-      endmethod
 
       method Action dbg();
       endmethod
