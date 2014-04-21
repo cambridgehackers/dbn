@@ -34,11 +34,17 @@
 #include "RbmIndicationWrapper.h"
 #include "MmRequestProxy.h"
 #include "MmIndicationWrapper.h"
+#include "SigmoidRequestProxy.h"
+#include "SigmoidIndicationWrapper.h"
 #include "TimerRequestProxy.h"
 #include "TimerIndicationWrapper.h"
 
+class SigmoidIndication;
+
 extern RbmRequestProxy *rbmdevice;
 extern MmRequestProxy *mmdevice;
+extern SigmoidRequestProxy *sigmoiddevice;
+extern SigmoidIndication *sigmoidindication;
 extern TimerRequestProxy *timerdevice;
 extern sem_t mul_sem;
 
@@ -98,6 +104,29 @@ public:
   }
 };
 
+class SigmoidIndication : public SigmoidIndicationWrapper
+{
+public:
+ SigmoidIndication(int id) : SigmoidIndicationWrapper(id) {
+  }
+  virtual ~SigmoidIndication() {}
+  virtual void sigmoidDone() {
+    fprintf(stderr, "sigmoidDone\n");
+    sem_post(&mul_sem);
+  }
+  virtual void sigmoidTableUpdated(uint32_t addr) {
+    sem_post(&mul_sem);
+  }
+  uint32_t sigmoidTableSize() { return sigmoidTableSize_; }
+  virtual void sigmoidTableSize(uint32_t size) {
+    fprintf(stderr, "sigmoidTableSize %d\n", size);
+    sigmoidTableSize_ = size;
+    sem_post(&mul_sem);
+  }
+ private:
+  uint32_t sigmoidTableSize_;
+};
+
 class TimerIndication : public TimerIndicationWrapper
 {
 public:
@@ -114,20 +143,6 @@ public:
  RbmIndication(int id) : RbmIndicationWrapper(id) {
   }
   virtual ~RbmIndication() {}
-  virtual void sigmoidDone() {
-    fprintf(stderr, "sigmoidDone\n");
-    sem_post(&mul_sem);
-  }
-  virtual void sigmoidTableUpdated(uint32_t addr) {
-    sem_post(&mul_sem);
-  }
-  uint32_t sigmoidTableSize_;
-  uint32_t sigmoidTableSize() { return sigmoidTableSize_; }
-  virtual void sigmoidTableSize(uint32_t size) {
-    fprintf(stderr, "sigmoidTableSize %d\n", size);
-    sigmoidTableSize_ = size;
-    sem_post(&mul_sem);
-  }
   virtual void bramMmfDone() {
     //fprintf(stderr, "bramMmfDone\n");
     sem_post(&mul_sem);

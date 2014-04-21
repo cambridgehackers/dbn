@@ -43,15 +43,18 @@
 
 static int verbose = 0;
 
-RbmRequestProxy *rbmdevice = 0;
-MmRequestProxy *mmdevice = 0;
-TimerRequestProxy *timerdevice = 0;
 class RbmIndication;
-RbmIndication *deviceIndication = 0;
-MmIndication *mmdeviceIndication = 0;
-TimerIndication *timerdeviceIndication = 0;
+
 DmaConfigProxy *dma = 0;
 DmaIndicationWrapper *dmaIndication = 0;
+MmIndication *mmdeviceIndication = 0;
+MmRequestProxy *mmdevice = 0;
+SigmoidIndication *sigmoidIndication = 0;
+SigmoidRequestProxy *sigmoiddevice = 0;
+RbmIndication *deviceIndication = 0;
+RbmRequestProxy *rbmdevice = 0;
+TimerIndication *timerdeviceIndication = 0;
+TimerRequestProxy *timerdevice = 0;
 
 long dotprod = 0;
 
@@ -88,6 +91,8 @@ int main(int argc, const char **argv)
   deviceIndication = new RbmIndication(IfcNames_RbmIndicationPortal);
   mmdevice = new MmRequestProxy(IfcNames_MmRequestPortal);
   mmdeviceIndication = new MmIndication(IfcNames_MmIndicationPortal);
+  sigmoiddevice = new SigmoidRequestProxy(IfcNames_SigmoidRequestPortal);
+  sigmoidIndication = new SigmoidIndication(IfcNames_SigmoidIndicationPortal);
   timerdevice = new TimerRequestProxy(IfcNames_TimerRequestPortal);
   timerdeviceIndication = new TimerIndication(IfcNames_TimerIndicationPortal);
 

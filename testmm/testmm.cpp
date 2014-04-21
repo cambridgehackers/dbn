@@ -42,10 +42,14 @@
 
 static int verbose = 0;
 
+class SigmoidIndication;
+class MmIndication;
+
 RbmRequestProxy *rbmdevice = 0;
 MmRequestProxy *mmdevice = 0;
+SigmoidIndication *sigmoidindication = 0;
+SigmoidRequestProxy *sigmoiddevice = 0;
 TimerRequestProxy *timerdevice = 0;
-class MmIndication;
 MmIndication *mmdeviceIndication = 0;
 TimerIndication *timerdeviceIndication = 0;
 DmaConfigProxy *dma = 0;
