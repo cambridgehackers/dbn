@@ -264,7 +264,7 @@ interface Rbm#(numeric type n);
    interface Vector#(5, ObjectWriteClient#(TMul#(32,n))) writeClients;
 endinterface
 
-module [Module] mkRbm#(RbmIndication rbmInd, MmIndication mmInd, TimerIndication timerInd)(Rbm#(N))
+module [Module] mkRbm#(RbmIndication rbmInd, MmIndication mmInd, SigmoidIndication sigmoidInd, TimerIndication timerInd)(Rbm#(N))
    provisos (Add#(1,a__,N),
 	     Add#(N,0,n),
 	     Mul#(N,32,DmaSz)
@@ -295,13 +295,13 @@ module [Module] mkRbm#(RbmIndication rbmInd, MmIndication mmInd, TimerIndication
       $display("sigmoidDone");
       let d <- dmaSigmoid.finish();
       busyFifo.deq();
-      rbmInd.sigmoidDone();
+      sigmoidInd.sigmoidDone();
    endrule
    rule sigmoidTableUpdateDone;
       $display("sigmoidDone");
       let d <- dmaSigmoid.sigmoidTableUpdated();
       busyFifo.deq();
-      rbmInd.sigmoidTableUpdated(0);
+      sigmoidInd.sigmoidTableUpdated(0);
    endrule
    rule dmaStatesDone;
       $display("dmaStatesDone");
@@ -397,7 +397,7 @@ module [Module] mkRbm#(RbmIndication rbmInd, MmIndication mmInd, TimerIndication
 	 busyFifo.enq(True);
       endmethod
       method Action sigmoidTableSize();
-	 rbmInd.sigmoidTableSize(dmaSigmoid.tableSize());
+	 sigmoidInd.sigmoidTableSize(dmaSigmoid.tableSize());
       endmethod
 
       method Action dbg();

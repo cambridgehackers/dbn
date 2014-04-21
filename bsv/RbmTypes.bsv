@@ -23,7 +23,18 @@
 typedef 2 N;
 typedef TMul#(32,N) DmaSz;
 
-typedef enum {MmIndicationPortal, MmRequestPortal, RbmIndicationPortal, RbmRequestPortal, TimerIndicationPortal, TimerRequestPortal, DmaIndicationPortal, DmaConfigPortal} IfcNames deriving (Eq,Bits);
+typedef enum {
+   DmaConfigPortal,
+   DmaIndicationPortal,
+   MmIndicationPortal,
+   MmRequestPortal,
+   RbmIndicationPortal,
+   RbmRequestPortal,
+   SigmoidIndicationPortal,
+   SigmoidRequestPortal,
+   TimerIndicationPortal,
+   TimerRequestPortal
+} IfcNames deriving (Eq,Bits);
 
 interface MmIndication;
    method Action mmfDone();
@@ -35,10 +46,20 @@ interface MmRequest;
 		     Bit#(32) outPointer);
 endinterface   
 
-interface RbmIndication;
+interface SigmoidIndication;
    method Action sigmoidDone();
    method Action sigmoidTableSize(Bit#(32) size);
    method Action sigmoidTableUpdated(Bit#(32) addr);
+endinterface
+
+interface SigmoidRequest;
+    method Action sigmoid(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
+    method Action setSigmoidLimits(Bit#(32) rscale, Bit#(32) llimit, Bit#(32) ulimit);
+    method Action sigmoidTableSize();
+    method Action updateSigmoidTable(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) numElts);
+endinterface
+
+interface RbmIndication;
    method Action statesDone();
    method Action statesDone2();
    method Action updateWeightsDone();
@@ -55,11 +76,6 @@ interface RbmRequest;
 			 Bit#(32) outPointer);
    method Action toBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts);
    method Action fromBram(Bit#(32) off, Bit#(32) pointer, Bit#(32) offset, Bit#(32) numElts);
-
-    method Action sigmoid(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
-    method Action setSigmoidLimits(Bit#(32) rscale, Bit#(32) llimit, Bit#(32) ulimit);
-    method Action sigmoidTableSize();
-    method Action updateSigmoidTable(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) numElts);
 
     method Action computeStates(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) writePointer, Bit#(32) writeOffset, Bit#(32) numElts);
     method Action computeStates2(Bit#(32) readPointer, Bit#(32) readOffset, Bit#(32) readPointer2, Bit#(32) readOffset2,
