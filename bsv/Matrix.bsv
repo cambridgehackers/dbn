@@ -246,6 +246,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 	     $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
 	  end
 	 sourceB[i].start(descriptorB.pointer, pack(truncate(startB)), pack(truncate(startB + descriptorB.numColumns)));
+	 UInt#(TLog#(n)) in = fromInteger(i);
 	 $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
 	  if (i == 0)
 	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC)), pack(truncate(startC + fromInteger(n))));
