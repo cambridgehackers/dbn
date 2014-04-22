@@ -345,7 +345,7 @@ typedef enum {
    Idle, Ready, Running, Done
    } MMState deriving (Bits, Eq);
 
-module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Float))) sourceA,
+module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Float))) sourceA,
 				     Vector#(K, VectorSource#(dsz, Vector#(N, Float))) sourceB,
 				     function Module#(DmaVectorSink#(dsz, Vector#(N, Float))) mkSink(PipeOut#(Vector#(N, Float)) pipe_in)
 				     )(DmaMatrixMultiplyIfc#(addrwidth, dsz))
@@ -509,8 +509,8 @@ endinterface
 
 (* synthesize *)
 module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
-   Vector#(TAdd#(K,1), DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
-   Vector#(1, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = cons(vfsources[0].vector, nil);
+   Vector#(TAdd#(K,J), DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
+   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = cons(vfsources[0].vector, nil);
    Vector#(K, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = takeAt(1, map(dmaVectorSourceVector, vfsources));
    DmaMatrixMultiplyIfc#(ObjectOffsetSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
    interface Vector readClients = map(getSourceReadClient, vfsources);
@@ -528,7 +528,7 @@ endmodule
 interface Mm#(numeric type n);
    interface MmRequest mmRequest;
    interface TimerRequest timerRequest;
-   interface Vector#(TAdd#(K,1), ObjectReadClient#(TMul#(32,N))) readClients;
+   interface Vector#(TAdd#(K,J), ObjectReadClient#(TMul#(32,N))) readClients;
    interface Vector#(1, ObjectWriteClient#(TMul#(32,n))) writeClients;
 endinterface
 

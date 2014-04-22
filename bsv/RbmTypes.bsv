@@ -22,10 +22,20 @@
 
 `ifndef N_VALUE
 typedef 2 N;
-typedef 4 K;
 `else
 typedef `N_VALUE N;
 `endif
+`ifndef J_VALUE
+typedef 1 J;
+`else
+typedef `J_VALUE J;
+`endif
+`ifndef K_VALUE
+typedef N K;
+`else
+typedef `K_VALUE K;
+`endif
+
 typedef TMul#(32,N) DmaSz;
 
 typedef enum {
