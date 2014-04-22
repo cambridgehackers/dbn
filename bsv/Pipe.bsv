@@ -145,6 +145,25 @@ module mkJoin#(function c f(a av, b bv), PipeOut#(a) apipe, PipeOut#(b) bpipe)(P
    endmethod
 endmodule
 
+module mkJoinVector#(function b f(Vector#(n, a) av), Vector#(n, PipeOut#(a)) apipes)(PipeOut#(b))
+   provisos (Bits#(Vector#(n,a),vasz));
+   method b first();
+      function a getfirst(PipeOut#(a) pipein); return pipein.first(); endfunction
+      Vector#(n,a) vec = map(getfirst, apipes);
+      return f(vec);
+   endmethod
+   method Action deq();
+      function a getfirst(PipeOut#(a) pipein); return pipein.first(); endfunction
+      for (Integer i = 0; i < valueOf(n); i = i + 1)
+	 apipes[i].deq();
+   endmethod
+   method Bool notEmpty();
+      function Bool getNotEmpty(PipeOut#(a) pipein); return pipein.notEmpty(); endfunction	 
+      function Bool myand(Bool a, Bool b); return a && b; endfunction
+      return foldl(myand, True, map(getNotEmpty, apipes));
+   endmethod
+endmodule
+
 module mkMap#(function b f(a av), PipeOut#(a) apipe)(PipeOut#(b));
    method b first();
       let av = apipe.first();
