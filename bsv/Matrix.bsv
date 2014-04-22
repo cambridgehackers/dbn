@@ -51,15 +51,15 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
    Reg#(UInt#(20)) numEltsReg <- mkReg(0);
    Reg#(UInt#(20)) countInReg <- mkReg(0);
    Vector#(N,FIFOF#(Tuple3#(Bool,Float,Float))) abfifos <- replicateM(mkFIFOF());
-   FIFOF#(Bool) lastFifo <- mkFIFOF();
+   Vector#(N,FIFOF#(Bool)) lastFifos <- replicateM(mkFIFOF());
    Vector#(N, PipeOut#(Tuple3#(Bool,Float,Float))) abpipes = map(toPipeOut,abfifos);
 
    Vector#(N, Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac);
    Vector#(N, FIFO#(Float)) accumFifo <- replicateM(mkFIFO());
    Vector#(N, FIFOF#(Float)) resultFifos <- replicateM(mkFIFOF());
 
-   rule mul;
-      for (Integer i = 0; i < valueOf(N); i = i + 1) begin
+   for (Integer i = 0; i < valueOf(N); i = i + 1) begin
+      rule mul;
 	 let v = abpipes[i].first;
 	 abpipes[i].deq;
 	 let isFirst = tpl_1(v);
@@ -71,16 +71,16 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 	    accum = tagged Valid accumFifo[i].first();
 	    accumFifo[i].deq();
 	 end
-            macs[i].request.put(tuple4(accum, x, y, defaultValue));
+         macs[i].request.put(tuple4(accum, x, y, defaultValue));
 	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y)
 				       + fshow(" isFirst=") + fshow(isFirst) + fshow(" accum=")+fshow(pack(accum))));
-      end
-   endrule
+      endrule
+   end
 
-   rule macout;
-      let isLast = lastFifo.first();
-      lastFifo.deq();
-      for (Integer i = 0; i < valueOf(N); i = i + 1) begin
+   for (Integer i = 0; i < valueOf(N); i = i + 1) begin
+      rule macout;
+	 let isLast = lastFifos[i].first();
+	 lastFifos[i].deq();
 	 Float vi;
 	 let resp <- macs[i].response.get();
 	 vi = tpl_1(resp);
@@ -91,8 +91,8 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 	    resultFifos[i].enq(vi);
 	    if (verbose) $display(fshow("label=")+fshow(label)+fshow(" isLast=")+fshow(isLast)+fshow(" mul=") + fshow(vi));
 	 end
-      end
-   endrule
+      endrule
+   end
 
    Vector#(N, PipeOut#(Float)) resultPipes = map(toPipeOut, resultFifos);
    PipeOut#(Vector#(N,Float)) resultPipe <- mkJoinVector(id, resultPipes);
@@ -115,8 +115,8 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 	    let avec = tpl_1(tpl);
 	    let bvec = tpl_2(tpl);
 	    abfifos[i].enq(tuple3(isFirst,avec[i], bvec[i]));
+	    lastFifos[i].enq(isLast);
 	 end
-	 lastFifo.enq(isLast);
       endmethod
    endinterface : request
    interface PipeOut pipe = dotpipe;
