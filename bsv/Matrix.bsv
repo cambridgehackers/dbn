@@ -36,118 +36,6 @@ import FloatOps::*;
 import Timer::*;
 import RbmTypes::*;
 
-module [Module] mkDotProd#(PipeOut#(Vector#(n,Float)) xpipe, PipeOut#(Vector#(n,Float)) ypipe, UInt#(nwidth) numElts, UInt#(TLog#(n)) label)(PipeOut#(Float))
-   provisos (
-      Add#(1,a__,n),
-      ReducePipe#(n,Float)
-      );
-
-   Bool verbose = False;
-   Bool useMac = True;
-
-   Reg#(UInt#(nwidth)) countInReg <- mkReg(0);
-   FIFOF#(Tuple3#(Bool,Vector#(n,Float),Vector#(n,Float))) xyfifo <- mkFIFOF();
-   FIFOF#(Bool) firstFifo <- mkFIFOF();
-   FIFOF#(Bool) lastFifo <- mkFIFOF();
-   PipeOut#(Tuple3#(Bool, Vector#(n,Float),Vector#(n,Float))) xypipe = toPipeOut(xyfifo);
-   rule xyin;
-      Bool isFirst = (countInReg == 0);
-      UInt#(nwidth) n = fromInteger(valueOf(n));
-      let c = countInReg+n;
-      Bool isLast = (c >= numElts);
-      if (isLast)
-	 c = 0;
-      countInReg <= c;
-      xpipe.deq();
-      ypipe.deq();
-      xyfifo.enq(tuple3(isFirst,xpipe.first(), ypipe.first()));
-      if (!useMac)
-	 firstFifo.enq(isFirst);
-      lastFifo.enq(isLast);
-   endrule
-
-
-   Vector#(n, Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac);
-   Vector#(n, FloatServer2#(Float)) muls <- replicateM(mkFloatMultiplier);
-   Vector#(n, FloatServer2#(Float)) adders <- replicateM(mkFloatAdder);
-   Vector#(n, FIFO#(Float)) accumFifo <- replicateM(mkFIFO());
-   FIFOF#(Vector#(n,Float)) resultFifo <- mkFIFOF();
-
-   rule mul;
-      let v = xypipe.first;
-      xypipe.deq;
-      let isFirst = tpl_1(v);
-      let x = tpl_2(v);
-      let y = tpl_3(v);
-
-      for (Integer i = 0; i < valueOf(n); i = i + 1) begin
-	 Maybe#(Float) accum = tagged Invalid;
-	 if (useMac) begin
-	     if (!isFirst) begin
-		accum = tagged Valid accumFifo[i].first();
-		accumFifo[i].deq();
-	     end
-            macs[i].request.put(tuple4(accum, x[i], y[i], defaultValue));
-	 end
-	 else begin
-	    muls[i].request.put(tuple3(x[i],y[i],defaultValue));
-	 end
-	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y) + fshow(" accum=")+fshow(pack(accum))));
-      end
-   endrule
-
-   rule add;
-      if (!useMac) begin
-	 Float accum = unpack(0);
-	 let isFirst = firstFifo.first();
-	 firstFifo.deq();
-	 for (Integer i = 0; i < valueOf(n); i = i + 1) begin
-	    if (!isFirst) begin
-	       accum = accumFifo[i].first();
-	       accumFifo[i].deq();
-	    end
-	    let resp <- adders[i].response.get();
-	    adders[i].request.put(tuple3(accum,tpl_1(resp),defaultValue));	 
-	 end
-      end
-   endrule
-
-   rule macout;
-      Vector#(n,Float) vs = unpack(0);
-      let isLast = lastFifo.first();
-      lastFifo.deq();
-      for (Integer i = 0; i < valueOf(n); i = i + 1) begin
-	 Float vi;
-	 if (useMac) begin
-	    let resp <- macs[i].response.get();
-	    vi = tpl_1(resp);
-	 end
-	 else begin
-	    let resp <- adders[i].response.get();
-	    vi = tpl_1(resp);
-	 end
-	 vs[i] = vi;
-	 if (!isLast) begin
-	    accumFifo[i].enq(vi);
-	 end
-      end
-      if (isLast) begin
-	 Vector#(n,Bit#(32)) ivs = unpack(pack(vs));
-	 resultFifo.enq(vs);
-	 if (verbose) $display(fshow("label=")+fshow(label)+fshow(" isLast=")+fshow(isLast)+fshow(" numElts=")+fshow(numElts)+fshow(" mul=") + fshow(ivs));
-      end
-   endrule
-
-   PipeOut#(Vector#(n,Float)) resultPipe = toPipeOut(resultFifo);
-   PipeOut#(Float) dotpipe <- mkReducePipe(mkFloatAddPipe, resultPipe);
-   PipeOut#(Float) displaydotpipe = (interface PipeOut#(Float);
-      method Float first(); return dotpipe.first(); endmethod
-      method Action deq(); $display(fshow("label=")+fshow(label)+fshow(" dotpipe=")+fshow(dotpipe.first())); dotpipe.deq(); endmethod
-      method Bool notEmpty(); return dotpipe.notEmpty(); endmethod
-      endinterface);
-   return dotpipe;
-endmodule
-
 interface DotProdServer#(numeric type n);
    interface Reg#(UInt#(20)) numElts;
    interface Put#(Tuple2#(Vector#(n,Float),Vector#(n,Float))) request;
@@ -159,87 +47,55 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 
    let n = valueOf(N);
    Bool verbose = False;
-   Bool useMac = True;
 
    Reg#(UInt#(20)) numEltsReg <- mkReg(0);
    Reg#(UInt#(20)) countInReg <- mkReg(0);
-   FIFOF#(Tuple3#(Bool,Vector#(N,Float),Vector#(N,Float))) xyfifo <- mkFIFOF();
-   FIFOF#(Bool) firstFifo <- mkFIFOF();
+   Vector#(N,FIFOF#(Tuple3#(Bool,Float,Float))) abfifos <- replicateM(mkFIFOF());
    FIFOF#(Bool) lastFifo <- mkFIFOF();
-   PipeOut#(Tuple3#(Bool, Vector#(N,Float),Vector#(N,Float))) xypipe = toPipeOut(xyfifo);
+   Vector#(N, PipeOut#(Tuple3#(Bool,Float,Float))) abpipes = map(toPipeOut,abfifos);
 
    Vector#(N, Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac);
-   Vector#(N, FloatServer2#(Float)) muls <- replicateM(mkFloatMultiplier);
-   Vector#(N, FloatServer2#(Float)) adders <- replicateM(mkFloatAdder);
    Vector#(N, FIFO#(Float)) accumFifo <- replicateM(mkFIFO());
-   FIFOF#(Vector#(N,Float)) resultFifo <- mkFIFOF();
+   Vector#(N, FIFOF#(Float)) resultFifos <- replicateM(mkFIFOF());
 
    rule mul;
-      let v = xypipe.first;
-      xypipe.deq;
-      let isFirst = tpl_1(v);
-      let x = tpl_2(v);
-      let y = tpl_3(v);
-
       for (Integer i = 0; i < valueOf(N); i = i + 1) begin
-	 Maybe#(Float) accum = tagged Invalid;
-	 if (useMac) begin
-	     if (!isFirst) begin
-		accum = tagged Valid accumFifo[i].first();
-		accumFifo[i].deq();
-	     end
-            macs[i].request.put(tuple4(accum, x[i], y[i], defaultValue));
-	 end
-	 else begin
-	    muls[i].request.put(tuple3(x[i],y[i],defaultValue));
-	 end
-	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y) + fshow(" accum=")+fshow(pack(accum))));
-      end
-   endrule
+	 let v = abpipes[i].first;
+	 abpipes[i].deq;
+	 let isFirst = tpl_1(v);
+	 let x = tpl_2(v);
+	 let y = tpl_3(v);
 
-   rule add;
-      if (!useMac) begin
-	 Float accum = unpack(0);
-	 let isFirst = firstFifo.first();
-	 firstFifo.deq();
-	 for (Integer i = 0; i < valueOf(N); i = i + 1) begin
-	    if (!isFirst) begin
-	       accum = accumFifo[i].first();
-	       accumFifo[i].deq();
-	    end
-	    let resp <- adders[i].response.get();
-	    adders[i].request.put(tuple3(accum,tpl_1(resp),defaultValue));	 
+	 Maybe#(Float) accum = tagged Invalid;
+	 if (!isFirst) begin
+	    accum = tagged Valid accumFifo[i].first();
+	    accumFifo[i].deq();
 	 end
+            macs[i].request.put(tuple4(accum, x, y, defaultValue));
+	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y)
+				       + fshow(" isFirst=") + fshow(isFirst) + fshow(" accum=")+fshow(pack(accum))));
       end
    endrule
 
    rule macout;
-      Vector#(N,Float) vs = unpack(0);
       let isLast = lastFifo.first();
       lastFifo.deq();
       for (Integer i = 0; i < valueOf(N); i = i + 1) begin
 	 Float vi;
-	 if (useMac) begin
-	    let resp <- macs[i].response.get();
-	    vi = tpl_1(resp);
-	 end
-	 else begin
-	    let resp <- adders[i].response.get();
-	    vi = tpl_1(resp);
-	 end
-	 vs[i] = vi;
+	 let resp <- macs[i].response.get();
+	 vi = tpl_1(resp);
 	 if (!isLast) begin
 	    accumFifo[i].enq(vi);
 	 end
-      end
-      if (isLast) begin
-	 Vector#(N,Bit#(32)) ivs = unpack(pack(vs));
-	 resultFifo.enq(vs);
-	 if (verbose) $display(fshow("label=")+fshow(label)+fshow(" isLast=")+fshow(isLast)+fshow(" numElts=")+fshow(numEltsReg)+fshow(" mul=") + fshow(ivs));
+	 else begin
+	    resultFifos[i].enq(vi);
+	    if (verbose) $display(fshow("label=")+fshow(label)+fshow(" isLast=")+fshow(isLast)+fshow(" mul=") + fshow(vi));
+	 end
       end
    endrule
 
-   PipeOut#(Vector#(N,Float)) resultPipe = toPipeOut(resultFifo);
+   Vector#(N, PipeOut#(Float)) resultPipes = map(toPipeOut, resultFifos);
+   PipeOut#(Vector#(N,Float)) resultPipe <- mkJoinVector(id, resultPipes);
    PipeOut#(Float) dotpipe <- mkReducePipe(mkFloatAddPipe, resultPipe);
    PipeOut#(Float) displaydotpipe = (interface PipeOut#(Float);
       method Float first(); return dotpipe.first(); endmethod
@@ -255,15 +111,17 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 	 if (isLast)
 	    c = 0;
 	 countInReg <= c;
-	 xyfifo.enq(tuple3(isFirst,tpl_1(tpl), tpl_2(tpl)));
-	 if (!useMac)
-	    firstFifo.enq(isFirst);
+	 for (Integer i = 0; i < valueOf(N); i = i + 1) begin
+	    let avec = tpl_1(tpl);
+	    let bvec = tpl_2(tpl);
+	    abfifos[i].enq(tuple3(isFirst,avec[i], bvec[i]));
+	 end
 	 lastFifo.enq(isLast);
       endmethod
    endinterface : request
    interface PipeOut pipe = dotpipe;
    interface Reg numElts = numEltsReg;
-endmodule
+endmodule : mkDotProdServer
 
 
 typedef struct {
