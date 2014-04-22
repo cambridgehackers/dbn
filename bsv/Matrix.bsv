@@ -375,6 +375,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    let k = valueOf(K);
    let nshift = valueOf(nshift);
    Bool verbose = False;
+   Bool verbose1 = True;
 
    Reg#(Bool) doneReg <- mkReg(False);
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorA <- mkReg(unpack(0));
@@ -415,41 +416,43 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 
    for (Integer i = 0; i < k; i = i + 1) begin
       rule startDotProd;
-	  Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[i].first;
-	  xypipes[i].deq();
-
-	  let row = tpl_1(xy);
-	  let col = tpl_2(xy)+fromInteger(i);
-
-	  let startA = row*descriptorA.numColumns; // row major
-	  let startB = col*descriptorB.numColumns; // col major layout (pre-transposed)
-	  let startC = row*descriptorC.numColumns + col; // row major
+	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[i].first;
+	 xypipes[i].deq();
+	 
+	 let row = tpl_1(xy);
+	 let col = tpl_2(xy)+fromInteger(i);
+	 
+	 let startA = row*descriptorA.numColumns; // row major
+	 let startB = col*descriptorB.numColumns; // col major layout (pre-transposed)
+	 let startC = row*descriptorC.numColumns + col; // row major
+	 
 	 if (verbose) $display($format(fshow(cycles)+fshow("    startDotProd xy=")+fshow(tuple2(row,col))
-				       +fshow(" startA=")+fshow(startA)
-				       +fshow(" startB=")+fshow(startB)
-				       +fshow(" startC=")+fshow(startC)));
+	    +fshow(" startA=")+fshow(startA)
+	    +fshow(" startB=")+fshow(startB)
+	    +fshow(" startC=")+fshow(startC)));
 
-	  if (i == 0) begin
-	     sourceA[0].start(descriptorA.pointer, pack(truncate(startA>>nshift)), pack(truncate(descriptorA.numColumns>>nshift)));
-	     if (verbose) $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
-	  end
-	 sourceB[i].start(descriptorB.pointer, pack(truncate(startB>>nshift)), pack(truncate(descriptorB.numColumns>>nshift)));
 	 UInt#(TLog#(K)) in = fromInteger(i);
-	 if (verbose) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
-	  if (i == 0)
-	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC>>nshift)), fromInteger(k/n));
-       endrule
-       if (i == 0)
-	  rule finishSourceA;
-	     if (verbose) $display($format(fshow(cycles)+fshow("    sourceA[0].finish ")));
-	     let b <- sourceA[0].finish();
-	  endrule
+	 if (i == 0) begin
+	    sinkC.vector.start(descriptorC.pointer, pack(truncate(startC>>nshift)), fromInteger(k/n));
+ 	    if (verbose || verbose1) $display($format(fshow(cycles)+fshow("      sinkC[")+fshow(in)+fshow("].start")+fshow(startC)));
+	 end
+	 if (i == 0) begin
+	    sourceA[0].start(descriptorA.pointer, pack(truncate(startA>>nshift)), pack(truncate(descriptorA.numColumns>>nshift)));
+	    if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
+	 end
+	 sourceB[i].start(descriptorB.pointer, pack(truncate(startB>>nshift)), pack(truncate(descriptorB.numColumns>>nshift)));
+	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
+      endrule
+      if (i == 0)
+	 rule finishSourceA;
+	    if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[0].finish ")));
+	    let b <- sourceA[0].finish();
+	 endrule
       rule finishSourceB;
 	 UInt#(TLog#(K)) in = fromInteger(i);
-	 if (verbose) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].finish")));
+	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].finish")));
 	 let b <- sourceB[i].finish();
       endrule
-      
    end
 
    rule dotProdValue;

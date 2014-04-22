@@ -7,8 +7,11 @@ import Randomizable::*;
 import Vector::*;
 import StmtFSM::*;
 import Pipe::*;
+import FIFO::*;
+import FPMAC::*;
 
 typedef Server#(Tuple3#(a,a,RoundMode), Tuple2#(a,Exception)) FloatServer2#(type a);
+
 
 (* synthesize *)
 module mkFloatAdder(FloatServer2#(Float));
@@ -59,7 +62,7 @@ endmodule
 
 (* synthesize *)
 module mkFloatMac(Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception)));
-   let mac <- mkFloatingPointFusedMultiplyAccumulate();
+   let mac <- mkFPMAC();
    return mac;
 endmodule
 
