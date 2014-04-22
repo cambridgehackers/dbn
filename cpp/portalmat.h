@@ -98,9 +98,9 @@ public:
  MmIndication(int id) : MmIndicationWrapper(id) {
   }
   virtual ~MmIndication() {}
-  virtual void mmfDone() {
-    //fprintf(stderr, "mmfDone\n");
+  virtual void mmfDone(uint64_t cycles) {
     sem_post(&mul_sem);
+    fprintf(stderr, "mmfDone cycles=%ld\n", cycles);
   }
 };
 

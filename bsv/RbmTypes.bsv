@@ -41,7 +41,7 @@ typedef enum {
 } IfcNames deriving (Eq,Bits);
 
 interface MmIndication;
-   method Action mmfDone();
+   method Action mmfDone(Bit#(64) cycles);
 endinterface
 
 interface MmRequest;
