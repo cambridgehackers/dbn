@@ -22,6 +22,7 @@
 
 `ifndef N_VALUE
 typedef 2 N;
+typedef 4 K;
 `else
 typedef `N_VALUE N;
 `endif

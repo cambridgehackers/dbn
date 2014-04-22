@@ -22,6 +22,8 @@
 
 import FIFO::*;
 import FIFOF::*;
+import MIMO::*;
+import DefaultValue::*;
 import SpecialFIFOs::*;
 import Vector::*;
 import BRAM::*;
@@ -153,7 +155,7 @@ interface DotProdServer#(numeric type n);
 endinterface
 
 (* synthesize *)
-module [Module] mkDotProdServer#(UInt#(TLog#(N)) label)(DotProdServer#(N));
+module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 
    let n = valueOf(N);
    Bool verbose = False;
@@ -344,11 +346,12 @@ typedef enum {
    } MMState deriving (Bits, Eq);
 
 module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Float))) sourceA,
-				     Vector#(N, VectorSource#(dsz, Vector#(N, Float))) sourceB,
+				     Vector#(K, VectorSource#(dsz, Vector#(N, Float))) sourceB,
 				     function Module#(DmaVectorSink#(dsz, Vector#(N, Float))) mkSink(PipeOut#(Vector#(N, Float)) pipe_in)
 				     )(DmaMatrixMultiplyIfc#(addrwidth, dsz))
    provisos (Add#(a__,ObjectOffsetSize,addrwidth)
-	     , Add#(N,0,n)
+	     , Add#(N,n__,K)
+	     , Mul#(N,m__,K)
 	     , Log#(N,nshift)
 	     , FShow#(Float)
 	     , Arith#(Float)
@@ -358,7 +361,8 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 	     , Add#(b__, 20, addrwidth)
       );
 
-   let n = valueOf(n);
+   let n = valueOf(N);
+   let k = valueOf(K);
    let nshift = valueOf(nshift);
    Bool verbose = False;
 
@@ -368,13 +372,13 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorC <- mkReg(unpack(0));
    Reg#(UInt#(addrwidth)) dotprodCount <- mkReg(0);
 
-   Vector#(n, PipeOut#(Vector#(N,Float))) aPipes <- mkForkVector(sourceA[0].pipe);
+   Vector#(K, PipeOut#(Vector#(N,Float))) aPipes <- mkForkVector(sourceA[0].pipe);
 
    function Module#(DotProdServer#(N)) mkFxDotProd(Integer i);
       return mkDotProdServer(fromInteger(i));
    endfunction
-   Vector#(n, DotProdServer#(N)) fxdotprods <- genWithM(mkFxDotProd);
-   for (Integer i = 0; i < n; i = i+1)
+   Vector#(K, DotProdServer#(N)) fxdotprods <- genWithM(mkFxDotProd);
+   for (Integer i = 0; i < k; i = i+1)
       rule connectDotProd;
 	 let a = aPipes[i].first();
 	 aPipes[i].deq();
@@ -383,12 +387,13 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 	 fxdotprods[i].request.put(tuple2(a, b));
       endrule
 
-   FIFOF#(Vector#(N,Float)) dfifo <- mkFIFOF();
+   MIMOConfiguration mimoCfg = defaultValue;
+   MIMO#(K,N,K,Float) dfifo <- mkMIMO(mimoCfg);
    let sinkC <- mkSink(toPipeOut(dfifo));
 
    XYRangePipeIfc#(UInt#(addrwidth)) xypipeifc <- mkXYRangePipeOut();
 
-   Vector#(TAdd#(n,2), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) xypipes <- mkForkVector(xypipeifc.pipe);
+   Vector#(TAdd#(K,2), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) xypipes <- mkForkVector(xypipeifc.pipe);
 
    Reg#(Bool) running <- mkReg(False);
    FIFOF#(Bool) doneFifo <- mkFIFOF();
@@ -398,7 +403,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
       cycles <= cycles+1;
    endrule
 
-   for (Integer i = 0; i < n; i = i + 1) begin
+   for (Integer i = 0; i < k; i = i + 1) begin
       rule startDotProd;
 	  Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[i].first;
 	  xypipes[i].deq();
@@ -419,11 +424,10 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 	     if (verbose) $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
 	  end
 	 sourceB[i].start(descriptorB.pointer, pack(truncate(startB>>nshift)), pack(truncate(descriptorB.numColumns>>nshift)));
-	 UInt#(TLog#(n)) in = fromInteger(i);
-	 Bit#(TAdd#(1,TLog#(n))) nn = fromInteger(n);
+	 UInt#(TLog#(K)) in = fromInteger(i);
 	 if (verbose) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
 	  if (i == 0)
-	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC>>nshift)), 1);
+	     sinkC.vector.start(descriptorC.pointer, pack(truncate(startC>>nshift)), fromInteger(k/n));
        endrule
        if (i == 0)
 	  rule finishSourceA;
@@ -431,7 +435,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 	     let b <- sourceA[0].finish();
 	  endrule
       rule finishSourceB;
-	 UInt#(TLog#(n)) in = fromInteger(i);
+	 UInt#(TLog#(K)) in = fromInteger(i);
 	 if (verbose) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].finish")));
 	 let b <- sourceB[i].finish();
       endrule
@@ -439,25 +443,25 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
    end
 
    rule dotProdValue;
-      Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[n].first;
-      xypipes[n].deq;
-      Vector#(N,Float) vs;
-      for (Integer i = 0; i < n; i = i + 1) begin
+      Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[k].first;
+      xypipes[k].deq;
+      Vector#(K,Float) vs;
+      for (Integer i = 0; i < k; i = i + 1) begin
 	 let v = fxdotprods[i].pipe.first;
 	 fxdotprods[i].pipe.deq;
 	 let xyi = tuple2(tpl_1(xy), tpl_2(xy)+fromInteger(i));
 	 if (verbose) $display($format(fshow(cycles)+fshow("    dotprodvalue xy=")+fshow(xyi)+fshow(" dotprod=")+fshow(v)));
 	 vs[i] = v;
       end
-      dfifo.enq(vs);
+      dfifo.enq(fromInteger(k), vs);
    endrule
 
    rule sinkDone;
       // each time we write a burst of k values via sinkC
-      let xy = xypipes[n+1].first;
-      xypipes[n+1].deq;
+      let xy = xypipes[k+1].first;
+      xypipes[k+1].deq;
       let b <- sinkC.vector.finish();
-      let c = dotprodCount-fromInteger(n);
+      let c = dotprodCount-fromInteger(k);
       if (verbose) $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)+fshow("    xy=")+fshow(xy)));
       dotprodCount <= c;
       if (c == 0) begin
@@ -470,7 +474,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC) if (dotprodCount == 0);
       XYRangeConfig#(UInt#(addrwidth)) xycfg = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: 1,
-							      ybase: 0, ylimit: numRowsB, ystep: fromInteger(n) };
+							      ybase: 0, ylimit: numRowsB, ystep: fromInteger(k) };
       descriptorA <= MatrixDescriptor { pointer: pointerA, base: 0, numRows: numRowsA, numColumns: numColumnsA};
       descriptorB <= MatrixDescriptor { pointer: pointerB, base: 0, numRows: numRowsB, numColumns: numColumnsB};
       descriptorC <= MatrixDescriptor { pointer: pointerC, base: 0, numRows: numRowsA, numColumns: numRowsB};
@@ -480,7 +484,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
       if (verbose) $display("mm.start ra=%d ca=%d rb=%d cb=%d dotprodCount=%d", numRowsA, numColumnsA, numRowsB, numColumnsB, dotprodCount);
       if (verbose) $display($format(fshow("mm.start ")+fshow(xycfg)));
       xypipeifc.start(xycfg);
-      for (Integer i = 0; i < valueOf(N); i = i + 1) begin
+      for (Integer i = 0; i < k; i = i + 1) begin
 	 fxdotprods[i].numElts <= truncate(numColumnsA);
       end
    endmethod
@@ -494,7 +498,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(1, VectorSource#(dsz, Vector#(N, Fl
 endmodule
 
 interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
-   interface Vector#(TAdd#(N,1), ObjectReadClient#(dmasz)) readClients;
+   interface Vector#(TAdd#(K,1), ObjectReadClient#(dmasz)) readClients;
    interface Vector#(1, ObjectWriteClient#(dmasz)) writeClients;
    method Action start(ObjectPointer pointerA, UInt#(ObjectOffsetSize) numRowsA, UInt#(ObjectOffsetSize) numColumnsA,
 		       ObjectPointer pointerB, UInt#(ObjectOffsetSize) numRowsB, UInt#(ObjectOffsetSize) numColumnsB,
@@ -505,9 +509,9 @@ endinterface
 
 (* synthesize *)
 module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
-   Vector#(TAdd#(N,1), DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
+   Vector#(TAdd#(K,1), DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
    Vector#(1, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = cons(vfsources[0].vector, nil);
-   Vector#(N, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = takeAt(1, map(dmaVectorSourceVector, vfsources));
+   Vector#(K, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = takeAt(1, map(dmaVectorSourceVector, vfsources));
    DmaMatrixMultiplyIfc#(ObjectOffsetSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
    interface Vector readClients = map(getSourceReadClient, vfsources);
    interface Vector writeClients = cons(dmaMMF.dmaClient, nil);
@@ -524,7 +528,7 @@ endmodule
 interface Mm#(numeric type n);
    interface MmRequest mmRequest;
    interface TimerRequest timerRequest;
-   interface Vector#(TAdd#(1,N), ObjectReadClient#(TMul#(32,N))) readClients;
+   interface Vector#(TAdd#(K,1), ObjectReadClient#(TMul#(32,N))) readClients;
    interface Vector#(1, ObjectWriteClient#(TMul#(32,n))) writeClients;
 endinterface
 
