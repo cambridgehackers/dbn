@@ -345,6 +345,15 @@ typedef enum {
    Idle, Ready, Running, Done
    } MMState deriving (Bits, Eq);
 
+/*!
+ * Multiplies two matrices A and B and writes the result to memory.
+ * Fetches J rows at a time from A and K rows at a time from B.
+ * Each cycle, it can fetch N elements of a row or column.
+ * 
+ * Just considering memory bandwidth, every J+K cycles it is ready to perform J*K*N multiply accumulates.
+ *
+ * Currently, requires J == 1.
+ */
 module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Float))) sourceA,
 				     Vector#(K, VectorSource#(dsz, Vector#(N, Float))) sourceB,
 				     function Module#(DmaVectorSink#(dsz, Vector#(N, Float))) mkSink(PipeOut#(Vector#(N, Float)) pipe_in)
@@ -352,6 +361,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    provisos (Add#(a__,ObjectOffsetSize,addrwidth)
 	     , Add#(N,n__,K)
 	     , Mul#(N,m__,K)
+	     , Add#(1,0,J)
 	     , Log#(N,nshift)
 	     , FShow#(Float)
 	     , Arith#(Float)
