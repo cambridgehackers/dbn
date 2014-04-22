@@ -51,6 +51,20 @@ instance PipeInOut#(a, FIFOF#(a));
    endfunction
 endinstance
 
+instance PipeInOut#(Vector#(n,a), MIMO#(k,n,sz,a));
+   function PipeOut#(Vector#(n,a)) toPipeOut(MIMO#(k,n,sz,a) in);
+      return (interface PipeOut#(a);
+		 method first = in.first;
+		 method Action deq() if (in.deqReadyN(fromInteger(valueOf(n))));
+		    in.deq(fromInteger(valueOf(n)));
+		 endmethod
+		 method Bool notEmpty();
+		    return in.deqReadyN(fromInteger(valueOf(n)));
+		 endmethod
+	      endinterface);
+   endfunction
+endinstance
+
 instance MkPipeInOut#(a, Get#(a))
    provisos (Bits#(a, asz));
    module mkPipeOut#(Get#(a) in)(PipeOut#(a));
