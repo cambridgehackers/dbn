@@ -67,7 +67,7 @@ module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
    interface VectorSource vector;
        method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
 	  if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
-          memreadEngine.start(p, a << ashift, truncate(l << ashift), 1 << ashift);
+          memreadEngine.start(p, a << ashift, truncate(l << ashift), (16 << ashift));
        endmethod
       method ActionValue#(Bool) finish();
 	 let b <- memreadEngine.finish();
@@ -125,7 +125,7 @@ module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
    interface VectorSink vector;
        method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
 	  if (verbose) $display("DmaVectorSink.start   p=%d offset=%h l=%h", p, a, l);
-	  memwriteEngine.start(p, a << ashift, truncate(l << ashift), 1 << ashift);
+	  memwriteEngine.start(p, a << ashift, truncate(l << ashift), 16 << ashift);
        endmethod
       method ActionValue#(Bool) finish();
 	 let b <- memwriteEngine.finish();
