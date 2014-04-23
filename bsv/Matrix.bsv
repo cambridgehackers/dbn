@@ -56,7 +56,7 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
    Vector#(N,FIFOF#(Bool)) lastFifos <- replicateM(mkFIFOF());
    Vector#(N, PipeOut#(Tuple3#(Bool,Float,Float))) abpipes = map(toPipeOut,abfifos);
 
-   Vector#(NUM_MACS, Server#(Tuple4#(Maybe#(Float), Float, Float), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac(defaultValue));
+   Vector#(NUM_MACS, Server#(Tuple3#(Maybe#(Float), Float, Float), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac(defaultValue));
    Vector#(1, FIFOF#(Bit#(TLog#(N)))) chanFifo <- replicateM(mkFIFOF());
    Vector#(N, FIFO#(Float)) accumFifo <- replicateM(mkFIFO());
    Vector#(N, FIFOF#(Float)) resultFifos <- replicateM(mkFIFOF());
