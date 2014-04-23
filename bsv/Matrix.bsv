@@ -42,6 +42,8 @@ interface DotProdServer#(numeric type n);
    interface PipeOut#(Float) pipe;
 endinterface
 
+typedef 1 NUM_MACS;
+
 (* synthesize *)
 module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 
@@ -54,7 +56,8 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
    Vector#(N,FIFOF#(Bool)) lastFifos <- replicateM(mkFIFOF());
    Vector#(N, PipeOut#(Tuple3#(Bool,Float,Float))) abpipes = map(toPipeOut,abfifos);
 
-   Vector#(N, Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac);
+   Vector#(NUM_MACS, Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac);
+   Vector#(1, FIFOF#(Bit#(TLog#(N)))) chanFifo <- replicateM(mkFIFOF());
    Vector#(N, FIFO#(Float)) accumFifo <- replicateM(mkFIFO());
    Vector#(N, FIFOF#(Float)) resultFifos <- replicateM(mkFIFOF());
 
@@ -71,18 +74,28 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 	    accum = tagged Valid accumFifo[i].first();
 	    accumFifo[i].deq();
 	 end
-         macs[i].request.put(tuple4(accum, x, y, defaultValue));
+	 Integer mac_number = i;
+	 if (valueOf(N) > valueOf(NUM_MACS)) begin
+	    chanFifo[0].enq(fromInteger(i));
+	    mac_number = 0;
+	 end
+         macs[mac_number].request.put(tuple4(accum, x, y, defaultValue));
 	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y)
 				       + fshow(" isFirst=") + fshow(isFirst) + fshow(" accum=")+fshow(pack(accum))));
       endrule
    end
 
    for (Integer i = 0; i < valueOf(N); i = i + 1) begin
-      rule macout;
+      rule macout if ((valueOf(N) == valueOf(NUM_MACS)) || (chanFifo[0].first() == fromInteger(i)));
+	 Integer mac_number = i;
+	 if (valueOf(N) > valueOf(NUM_MACS)) begin
+	    chanFifo[0].deq();
+	    mac_number = 0;
+	 end
 	 let isLast = lastFifos[i].first();
 	 lastFifos[i].deq();
 	 Float vi;
-	 let resp <- macs[i].response.get();
+	 let resp <- macs[mac_number].response.get();
 	 vi = tpl_1(resp);
 	 if (!isLast) begin
 	    accumFifo[i].enq(vi);
