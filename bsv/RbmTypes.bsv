@@ -48,7 +48,9 @@ typedef enum {
    SigmoidIndicationPortal,
    SigmoidRequestPortal,
    TimerIndicationPortal,
-   TimerRequestPortal
+   TimerRequestPortal,
+   FpMacRequestPortal,
+   FpMacIndicationPortal
 } IfcNames deriving (Eq,Bits);
 
 interface MmIndication;

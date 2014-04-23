@@ -1,7 +1,7 @@
 BSVDIR=$(XBSVDIR)/bsv
-S2H = RbmRequest MmRequest SigmoidRequest TimerRequest DmaConfig
-H2S = RbmIndication MmIndication SigmoidIndication TimerIndication DmaIndication
-BSVFILES = $(DBNDIR)/bsv/RbmTypes.bsv $(DBNDIR)/bsv/Timer.bsv $(DBNTOPBSV)
+S2H = RbmRequest MmRequest SigmoidRequest TimerRequest DmaConfig FpMacRequest
+H2S = RbmIndication MmIndication SigmoidIndication TimerIndication DmaIndication FpMacIndication
+BSVFILES = $(DBNDIR)/bsv/RbmTypes.bsv $(DBNDIR)/bsv/Timer.bsv $(DBNDIR)/bsv/FpMacTb.bsv $(DBNTOPBSV)
 CPPFILES= $(DBNDIR)/cpp/portalmat.cpp $(DBNDIR)/cpp/rbm.cpp $(TESTCPPFILES)
 XBSVFLAGS = --clib opencv_core
 Dma = Dma

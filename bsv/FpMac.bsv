@@ -236,7 +236,7 @@ function Bool isNaNOrInfinity( FloatingPoint#(e,m) din );
    return (din.exp == '1);
 endfunction
 
-module mkFPMAC(Server#(Tuple4#(Maybe#(FloatingPoint#(e,m)), FloatingPoint#(e,m), FloatingPoint#(e,m), RoundMode), Tuple2#(FloatingPoint#(e,m),Exception)))
+module mkFpMac(Server#(Tuple4#(Maybe#(FloatingPoint#(e,m)), FloatingPoint#(e,m), FloatingPoint#(e,m), RoundMode), Tuple2#(FloatingPoint#(e,m),Exception)))
    provisos(
       Add#(e,2,ebits),
       Add#(m,1,mbits),

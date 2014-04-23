@@ -8,7 +8,7 @@ import Vector::*;
 import StmtFSM::*;
 import Pipe::*;
 import FIFO::*;
-import FPMAC::*;
+import FpMac::*;
 
 typedef Server#(Tuple3#(a,a,RoundMode), Tuple2#(a,Exception)) FloatServer2#(type a);
 
@@ -62,7 +62,7 @@ endmodule
 
 (* synthesize *)
 module mkFloatMac(Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception)));
-   let mac <- mkFPMAC();
+   let mac <- mkFpMac();
    return mac;
 endmodule
 
