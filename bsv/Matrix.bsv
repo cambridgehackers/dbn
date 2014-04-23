@@ -124,12 +124,15 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 	 if (isLast)
 	    c = 0;
 	 countInReg <= c;
-	 for (Integer i = 0; i < valueOf(N); i = i + 1) begin
-	    let avec = tpl_1(tpl);
-	    let bvec = tpl_2(tpl);
-	    abfifos[i].enq(tuple3(isFirst,avec[i], bvec[i]));
-	    lastFifos[i].enq(isLast);
-	 end
+	 match { .avec, .bvec } = tpl;
+	 function Action enqvalues(Integer i);
+	    action
+	       abfifos[i].enq(tuple3(isFirst,avec[i], bvec[i]));
+	       lastFifos[i].enq(isLast);
+	    endaction
+	 endfunction
+	 Vector#(N, Integer) indices = genVector();
+	 mapM_(enqvalues, indices);
       endmethod
    endinterface : request
    interface PipeOut pipe = dotpipe;
