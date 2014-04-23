@@ -9,6 +9,7 @@ import StmtFSM::*;
 import Pipe::*;
 import FIFO::*;
 import BUtils::*;
+import PipeMul::*;
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -247,8 +248,9 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
       Add#(m, b__, mmbits),
       Add#(c__, TLog#(TAdd#(1, mmbits)), TAdd#(e, 1)),
       Add#(d__, TLog#(TAdd#(1, m5bits)), TAdd#(e, 1)),
-      Add#(1, TAdd#(1, TAdd#(m, 3)), m5bits)
-      );
+      Add#(1, TAdd#(1, TAdd#(m, 3)), m5bits),
+      Add#(e__, mmbits, TMul#(2, mmbits))
+      );   
 
    FIFO#(Tuple3#(Maybe#(FloatingPoint#(e,m)),
 		 FloatingPoint#(e,m),
@@ -336,48 +338,53 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 			   sfdC));
    endrule
 
-   FIFO#(Tuple5#(CommonState#(e,m),
-		 Bool,
-		 FloatingPoint#(e,m),
-		 Bool,
-		 Int#(ebits))) fState_S2 <- mkLFIFO;
-   FIFO#(Bit#(mmbits)) fProd_S2 <- mkLFIFO;
+   // FIFO#(Tuple5#(CommonState#(e,m),
+   // 		 Bool,
+   // 		 FloatingPoint#(e,m),
+   // 		 Bool,
+   // 		 Int#(ebits))) fState_S2 <- mkLFIFO;
+   //FIFO#(Bit#(mmbits)) fProd_S2 <- mkLFIFO;
 
+   PipeMul#(2,mmbits,Tuple5#(CommonState#(e,m),Bool,FloatingPoint#(e,m),Bool,Int#(ebits))) pipe_mul <- mkPipeMul;
+   
    // start multiply
    rule s2_stage;
       match { .s, .acc, .opA, .sgnBC, .expBC, .sfdB, .sfdC } <- toGet(fState_S1).get;
 
-      let sfdBC = primMul(sfdB, sfdC);
+      //let sfdBC = primMul(sfdB, sfdC);
+      //fProd_S2.enq(sfdBC);
+      
+      let marker = tuple5(s,acc,opA,sgnBC,expBC);
+      pipe_mul.put(extend(unpack(sfdB)),extend(unpack(sfdC)),marker);
 
-      fProd_S2.enq(sfdBC);
 
-      fState_S2.enq(tuple5(s,
-			   acc,
-			   opA,
-			   sgnBC,
-			   expBC));
+      // fState_S2.enq(tuple5(s,
+      // 			   acc,
+      // 			   opA,
+      // 			   sgnBC,
+      // 			   expBC));
    endrule
 
-   FIFO#(Tuple5#(CommonState#(e,m),
-		 Bool,
-		 FloatingPoint#(e,m),
-		 Bool,
-		 Int#(ebits))) fState_S3 <- mkLFIFO;
-   FIFO#(Bit#(mmbits)) fProd_S3 <- mkLFIFO;
+   // FIFO#(Tuple5#(CommonState#(e,m),
+   // 		 Bool,
+   // 		 FloatingPoint#(e,m),
+   // 		 Bool,
+   // 		 Int#(ebits))) fState_S3 <- mkLFIFO;
+   //FIFO#(Bit#(mmbits)) fProd_S3 <- mkLFIFO;
 
    // passthrough stage for multiply register retiming
-   rule s3_stage;
-      match { .s, .acc, .opA, .sgnBC, .expBC } <- toGet(fState_S2).get;
-      let sfdBC <- toGet(fProd_S2).get;
+   // rule s3_stage;
+   //    match { .s, .acc, .opA, .sgnBC, .expBC } <- toGet(fState_S2).get;
 
-      fProd_S3.enq(sfdBC);
+   //    let sfdBC <- toGet(fProd_S2).get;
+   //    fProd_S3.enq(sfdBC);
 
-      fState_S3.enq(tuple5(s,
-			   acc,
-			   opA,
-			   sgnBC,
-			   expBC));
-   endrule
+   //    fState_S3.enq(tuple5(s,
+   // 			   acc,
+   // 			   opA,
+   // 			   sgnBC,
+   // 			   expBC));
+   // endrule
 
    FIFO#(Tuple5#(CommonState#(e,m),
 		 Bool,
@@ -387,9 +394,14 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 
    // normalize multiplication result
    rule s4_stage;
-      match { .s, .acc, .opA, .sgnBC, .expBC } <- toGet(fState_S3).get;
-      let sfdBC <- toGet(fProd_S3).get;
+      //match { .s, .acc, .opA, .sgnBC, .expBC } <- toGet(fState_S3).get;
 
+      //let sfdBC <- toGet(fProd_S3).get;
+      Tuple2#(UInt#(mmbits),Tuple5#(CommonState#(e,m),Bool,FloatingPoint#(e,m),Bool,Int#(ebits)))  foo <- pipe_mul.get;
+      Tuple5#(CommonState#(e,m),Bool,FloatingPoint#(e,m),Bool,Int#(ebits)) bar = tpl_2(foo);
+      match { .s, .acc, .opA, .sgnBC, .expBC } = bar;
+      Bit#(mmbits) sfdBC = pack(tpl_1(foo));
+      
       FloatingPoint#(e,m) bc = defaultValue;
       Bit#(2) guardBC = ?;
 
