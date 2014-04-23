@@ -236,7 +236,7 @@ function Bool isNaNOrInfinity( FloatingPoint#(e,m) din );
    return (din.exp == '1);
 endfunction
 
-module mkFpMac(Server#(Tuple4#(Maybe#(FloatingPoint#(e,m)), FloatingPoint#(e,m), FloatingPoint#(e,m), RoundMode), Tuple2#(FloatingPoint#(e,m),Exception)))
+module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), FloatingPoint#(e,m), FloatingPoint#(e,m)), Tuple2#(FloatingPoint#(e,m),Exception)))
    provisos(
       Add#(e,2,ebits),
       Add#(m,1,mbits),
@@ -250,10 +250,9 @@ module mkFpMac(Server#(Tuple4#(Maybe#(FloatingPoint#(e,m)), FloatingPoint#(e,m),
       Add#(1, TAdd#(1, TAdd#(m, 3)), m5bits)
       );
 
-   FIFO#(Tuple4#(Maybe#(FloatingPoint#(e,m)),
+   FIFO#(Tuple3#(Maybe#(FloatingPoint#(e,m)),
 		 FloatingPoint#(e,m),
-		 FloatingPoint#(e,m),
-		 RoundMode)) fOperand_S0 <- mkLFIFO;
+		 FloatingPoint#(e,m))) fOperand_S0 <- mkLFIFO;
 
    FIFO#(Tuple7#(CommonState#(e,m),
 		 Bool,
@@ -265,7 +264,7 @@ module mkFpMac(Server#(Tuple4#(Maybe#(FloatingPoint#(e,m)), FloatingPoint#(e,m),
 
    // check operands, compute exponent for multiply
    rule s1_stage;
-      match { .mopA, .opB, .opC, .rmode } <- toGet(fOperand_S0).get;
+      match { .mopA, .opB, .opC } <- toGet(fOperand_S0).get;
 
       CommonState#(e,m) s = CommonState {
 	 res: tagged Invalid,
@@ -600,13 +599,13 @@ module mkFpMac(Server#(Tuple4#(Maybe#(FloatingPoint#(e,m)), FloatingPoint#(e,m),
 	 out = x;
       end
       else begin
-	 let y = round(s.rmode, out, guard);
+	 let y = round(rmode, out, guard);
 	 out = tpl_1(y);
 	 s.exc = s.exc | tpl_2(y);
 
 	 // adjust sign for exact zero result
 	 if (acc && isZero(out) && !s.exc.inexact && sub) begin
-	    out.sign = (s.rmode == Rnd_Minus_Inf);
+	    out.sign = (rmode == Rnd_Minus_Inf);
 	 end
       end
 

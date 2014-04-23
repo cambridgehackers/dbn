@@ -56,7 +56,7 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
    Vector#(N,FIFOF#(Bool)) lastFifos <- replicateM(mkFIFOF());
    Vector#(N, PipeOut#(Tuple3#(Bool,Float,Float))) abpipes = map(toPipeOut,abfifos);
 
-   Vector#(NUM_MACS, Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac);
+   Vector#(NUM_MACS, Server#(Tuple4#(Maybe#(Float), Float, Float), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac(defaultValue));
    Vector#(1, FIFOF#(Bit#(TLog#(N)))) chanFifo <- replicateM(mkFIFOF());
    Vector#(N, FIFO#(Float)) accumFifo <- replicateM(mkFIFO());
    Vector#(N, FIFOF#(Float)) resultFifos <- replicateM(mkFIFOF());
@@ -79,7 +79,7 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 	    chanFifo[0].enq(fromInteger(i));
 	    mac_number = 0;
 	 end
-         macs[mac_number].request.put(tuple4(accum, x, y, defaultValue));
+         macs[mac_number].request.put(tuple3(accum, x, y));
 	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y)
 				       + fshow(" isFirst=") + fshow(isFirst) + fshow(" accum=")+fshow(pack(accum))));
       endrule
