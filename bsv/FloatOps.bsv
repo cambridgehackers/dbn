@@ -61,8 +61,8 @@ module mkFloatMultiplier(FloatServer2#(Float));
 endmodule
 
 (* synthesize *)
-module mkFloatMac(Server#(Tuple4#(Maybe#(Float), Float, Float, RoundMode), Tuple2#(Float,Exception)));
-   let mac <- mkFpMac();
+module mkFloatMac#(RoundMode rmode) (Server#(Tuple3#(Maybe#(Float), Float, Float), Tuple2#(Float,Exception)));
+   let mac <- mkFpMac(rmode);
    return mac;
 endmodule
 
