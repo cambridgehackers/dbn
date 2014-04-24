@@ -249,24 +249,35 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
       Add#(c__, TLog#(TAdd#(1, mmbits)), TAdd#(e, 1)),
       Add#(d__, TLog#(TAdd#(1, m5bits)), TAdd#(e, 1)),
       Add#(1, TAdd#(1, TAdd#(m, 3)), m5bits),
-      Add#(e__, mmbits, TMul#(2, mmbits))
+      Add#(e__, mmbits, TMul#(2, mmbits)),
+      // for PipeMul2
+      Add#(16, f__, mbits),
+      Add#(16, g__, TMul#(2, mbits)),
+      Add#(h__, mbits, TMul#(2, mbits)),
+      Add#(16, i__, mmbits),
+      Add#(j__, TSub#(mbits, 16), mmbits),
+      Add#(mmbits,0,48)
       );   
 
-   FIFO#(Tuple3#(Maybe#(FloatingPoint#(e,m)),
-		 FloatingPoint#(e,m),
-		 FloatingPoint#(e,m))) fOperand_S0 <- mkLFIFO;
+   Wire#(Tuple3#(Maybe#(FloatingPoint#(e,m)),
+		FloatingPoint#(e,m),
+		FloatingPoint#(e,m))) wOperand_S0 <- mkDWire(unpack(0));
 
-   FIFO#(Tuple7#(CommonState#(e,m),
-		 Bool,
-		 FloatingPoint#(e,m),
-		 Bool,
-		 Int#(ebits),
-		 Bit#(mbits),
-		 Bit#(mbits))) fState_S1 <- mkLFIFO;
+   Wire#(Bool) wValid_S0 <- mkDWire(False);
+
+   Reg#(Tuple7#(CommonState#(e,m),
+		Bool,
+		FloatingPoint#(e,m),
+		Bool,
+		Int#(ebits),
+		Bit#(mbits),
+		Bit#(mbits))) rState_S1 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S1 <- mkReg(False);
 
    // check operands, compute exponent for multiply
    rule s1_stage;
-      match { .mopA, .opB, .opC } <- toGet(fOperand_S0).get;
+      match { .mopA, .opB, .opC } = wOperand_S0;
+      let valid = wValid_S0;
 
       CommonState#(e,m) s = CommonState {
 	 res: tagged Invalid,
@@ -329,78 +340,83 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 	 s.res = tagged Valid opA;
       end
 
-      fState_S1.enq(tuple7(s,
-			   acc,
-			   opA,
-			   sgnBC,
-			   expBC,
-			   sfdB,
-			   sfdC));
+      
+      rState_S1 <= tuple7(s,
+			  acc,
+			  opA,
+			  sgnBC,
+			  expBC,
+			  sfdB,
+			  sfdC);
+      rValid_S1 <= valid;
    endrule
 
-   // FIFO#(Tuple5#(CommonState#(e,m),
-   // 		 Bool,
-   // 		 FloatingPoint#(e,m),
-   // 		 Bool,
-   // 		 Int#(ebits))) fState_S2 <- mkLFIFO;
-   //FIFO#(Bit#(mmbits)) fProd_S2 <- mkLFIFO;
+   Reg#(Tuple5#(CommonState#(e,m),
+		Bool,
+		FloatingPoint#(e,m),
+		Bool,
+		Int#(ebits))) rState_S2 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S2 <- mkReg(False);
+   Reg#(UInt#(mmbits)) rProd_S2lsb <- mkReg(0);
+   Reg#(UInt#(mmbits)) rProd_S2msb <- mkReg(0);
 
-   PipeMul#(2,mmbits,Tuple5#(CommonState#(e,m),Bool,FloatingPoint#(e,m),Bool,Int#(ebits))) pipe_mul <- mkPipeMul;
+   PipeMul2#(2,mbits,Tuple5#(CommonState#(e,m),Bool,FloatingPoint#(e,m),Bool,Int#(ebits))) pipe_mul <- mkPipeMul2;
    
    // start multiply
    rule s2_stage;
-      match { .s, .acc, .opA, .sgnBC, .expBC, .sfdB, .sfdC } <- toGet(fState_S1).get;
+      match { .s, .acc, .opA, .sgnBC, .expBC, .sfdB, .sfdC } = rState_S1;
+      let valid = rValid_S1;
 
-      //let sfdBC = primMul(sfdB, sfdC);
-      //fProd_S2.enq(sfdBC);
+      UInt#(mbits) sfdClsb = extend(unpack(sfdC[15:0]));
+      UInt#(TSub#(mbits,16)) sfdCmsb = unpack(sfdC[valueOf(mbits)-1:16]);
+      rProd_S2lsb <= extend(unpack(sfdB))*extend(sfdClsb);
+      rProd_S2msb <= extend(unpack(sfdB))*extend(sfdCmsb);
       
-      let marker = tuple5(s,acc,opA,sgnBC,expBC);
-      pipe_mul.put(extend(unpack(sfdB)),extend(unpack(sfdC)),marker);
-
-
-      // fState_S2.enq(tuple5(s,
-      // 			   acc,
-      // 			   opA,
-      // 			   sgnBC,
-      // 			   expBC));
+      rState_S2 <= tuple5(s,
+			  acc,
+			  opA,
+			  sgnBC,
+			  expBC);
+      rValid_S2 <= valid;
    endrule
 
-   // FIFO#(Tuple5#(CommonState#(e,m),
-   // 		 Bool,
-   // 		 FloatingPoint#(e,m),
-   // 		 Bool,
-   // 		 Int#(ebits))) fState_S3 <- mkLFIFO;
-   //FIFO#(Bit#(mmbits)) fProd_S3 <- mkLFIFO;
+   Reg#(Tuple5#(CommonState#(e,m),
+      Bool,
+      FloatingPoint#(e,m),
+      Bool,
+      Int#(ebits))) rState_S3 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S3 <- mkReg(False);
+   Reg#(UInt#(mmbits)) rProd_S3 <- mkReg(0);
 
-   // passthrough stage for multiply register retiming
-   // rule s3_stage;
-   //    match { .s, .acc, .opA, .sgnBC, .expBC } <- toGet(fState_S2).get;
+   //   add partial multiplies
+   rule s3_stage;
+      match { .s, .acc, .opA, .sgnBC, .expBC } = rState_S2;
+      let valid = rValid_S2;
 
-   //    let sfdBC <- toGet(fProd_S2).get;
-   //    fProd_S3.enq(sfdBC);
+      UInt#(mmbits) sfdBC = rProd_S2lsb + (rProd_S2msb << 16);
+      rProd_S3 <= sfdBC;
 
-   //    fState_S3.enq(tuple5(s,
-   // 			   acc,
-   // 			   opA,
-   // 			   sgnBC,
-   // 			   expBC));
-   // endrule
+      rState_S3 <= tuple5(s,
+			   acc,
+			   opA,
+			   sgnBC,
+			   expBC);
+      rValid_S3 <= valid;
+   endrule
 
-   FIFO#(Tuple5#(CommonState#(e,m),
+   Reg#(Tuple5#(CommonState#(e,m),
 		 Bool,
 		 FloatingPoint#(e,m),
 		 FloatingPoint#(e,m),
-		 Bit#(2))) fState_S4 <- mkLFIFO;
+		 Bit#(2))) rState_S4 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S4 <- mkReg(False);
 
    // normalize multiplication result
    rule s4_stage;
-      //match { .s, .acc, .opA, .sgnBC, .expBC } <- toGet(fState_S3).get;
+      match { .s, .acc, .opA, .sgnBC, .expBC } <- toGet(rState_S3).get;
+      let valid = rValid_S3;
 
-      //let sfdBC <- toGet(fProd_S3).get;
-      Tuple2#(UInt#(mmbits),Tuple5#(CommonState#(e,m),Bool,FloatingPoint#(e,m),Bool,Int#(ebits)))  foo <- pipe_mul.get;
-      Tuple5#(CommonState#(e,m),Bool,FloatingPoint#(e,m),Bool,Int#(ebits)) bar = tpl_2(foo);
-      match { .s, .acc, .opA, .sgnBC, .expBC } = bar;
-      Bit#(mmbits) sfdBC = pack(tpl_1(foo));
+      let sfdBC = pack(rProd_S3);
       
       FloatingPoint#(e,m) bc = defaultValue;
       Bit#(2) guardBC = ?;
@@ -450,25 +466,28 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 	 end
       end
 
-      fState_S4.enq(tuple5(s,
-			   acc,
-			   opA,
-			   bc,
-			   guardBC));
+      rState_S4 <= tuple5(s,
+			  acc,
+			  opA,
+			  bc,
+			  guardBC);
+      rValid_S4 <= valid;
    endrule
 
-   FIFO#(Tuple8#(CommonState#(e,m),
-		 Bool,
-		 Bool,
-		 Bool,
-		 Int#(ebits),
-		 Int#(ebits),
-		 Bit#(m5bits),
-		 Bit#(m5bits))) fState_S5 <- mkLFIFO;
+   Reg#(Tuple8#(CommonState#(e,m),
+		Bool,
+		Bool,
+		Bool,
+		Int#(ebits),
+		Int#(ebits),
+		Bit#(m5bits),
+		Bit#(m5bits))) rState_S5 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S5 <- mkReg(False);
 
    // calculate shift and sign for add
    rule s5_stage;
-      match { .s, .acc, .opA, .opBC, .guardBC } <- toGet(fState_S4).get;
+      match { .s, .acc, .opA, .opBC, .guardBC } = rState_S4;
+      let valid = rValid_S4;
 
       Int#(ebits) expA = isSubNormal(opA) ? fromInteger(minexp(opA)) : signExtend(unpack(unbias(opA)));
       Int#(ebits) expBC = isSubNormal(opBC) ? fromInteger(minexp(opBC)) : signExtend(unpack(unbias(opBC)));
@@ -499,27 +518,30 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 	 sgn = opA.sign;
       end
 
-      fState_S5.enq(tuple8(s,
-			   acc,
-			   sub,
-			   sgn,
-			   exp,
-			   shift,
-			   x,
-			   y));
+      rState_S5 <= tuple8(s,
+			  acc,
+			  sub,
+			  sgn,
+			  exp,
+			  shift,
+			  x,
+			  y);
+      rValid_S5 <= valid;
    endrule
 
-   FIFO#(Tuple7#(CommonState#(e,m),
-		 Bool,
-		 Bool,
-		 Bool,
-		 Int#(ebits),
-		 Bit#(m5bits),
-		 Bit#(m5bits))) fState_S6 <- mkLFIFO;
+   Reg#(Tuple7#(CommonState#(e,m),
+		Bool,
+		Bool,
+		Bool,
+		Int#(ebits),
+		Bit#(m5bits),
+		Bit#(m5bits))) rState_S6 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S6 <- mkReg(False);
 
    // shift second add operand
    rule s6_stage;
-      match { .s, .acc, .sub, .sgn, .exp, .shift, .x, .y } <- toGet(fState_S5).get;
+      match { .s, .acc, .sub, .sgn, .exp, .shift, .x, .y } = rState_S5;
+      let valid = rValid_S5;
 
       if (s.res matches tagged Invalid) begin
 	 if (shift < fromInteger(valueOf(m5bits))) begin
@@ -534,48 +556,54 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 	 end
       end
 
-      fState_S6.enq(tuple7(s,
-			   acc,
-			   sub,
-			   sgn,
-			   exp,
-			   x,
-			   y));
+      rState_S6 <= tuple7(s,
+			  acc,
+			  sub,
+			  sgn,
+			  exp,
+			  x,
+			  y);
+      rValid_S6 <= valid;
    endrule
 
-   FIFO#(Tuple7#(CommonState#(e,m),
-		 Bool,
-		 Bool,
-		 Bool,
-		 Int#(ebits),
-		 Bit#(m5bits),
-		 Bit#(m5bits))) fState_S7 <- mkLFIFO;
+   Reg#(Tuple7#(CommonState#(e,m),
+		Bool,
+		Bool,
+		Bool,
+		Int#(ebits),
+		Bit#(m5bits),
+		Bit#(m5bits))) rState_S7 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S7 <- mkReg(False);
 
    // add/subtract sfd
    rule s7_stage;
-      match { .s, .acc, .sub, .sgn, .exp, .x, .y } <- toGet(fState_S6).get;
+      match { .s, .acc, .sub, .sgn, .exp, .x, .y } = rState_S6;
+      let valid = rValid_S6;
 
       let sum = x + y;
       let diff = x - y;
 
-      fState_S7.enq(tuple7(s,
-			   acc,
-			   sub,
-			   sgn,
-			   exp,
-			   sum,
-			   diff));
+      rState_S7 <= tuple7(s,
+			  acc,
+			  sub,
+			  sgn,
+			  exp,
+			  sum,
+			  diff);
+      rValid_S7 <= valid;
    endrule
 
-   FIFO#(Tuple5#(CommonState#(e,m),
+   Reg#(Tuple5#(CommonState#(e,m),
 		 Bool,
 		 FloatingPoint#(e,m),
 		 Bit#(2),
-		 Bool)) fState_S8 <- mkLFIFO;
+		 Bool)) rState_S8 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S8 <- mkReg(False);
 
    // normalize addition result
    rule s8_stage;
-      match { .s, .acc, .sub, .sgn, .exp, .sum, .diff } <- toGet(fState_S7).get;
+      match { .s, .acc, .sub, .sgn, .exp, .sum, .diff } = rState_S7;
+      let valid = rValid_S7;
 
       FloatingPoint#(e,m) out = defaultValue;
       Bit#(2) guard = 0;
@@ -594,18 +622,21 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 	 s.exc = s.exc | tpl_3(y);
       end
 
-      fState_S8.enq(tuple5(s,
-			   acc,
-			   out,
-			   guard,
-			   sub));
+      rState_S8 <= tuple5(s,
+			  acc,
+			  out,
+			  guard,
+			  sub);
+      rValid_S8 <= valid;
    endrule
 
-   FIFO#(Tuple2#(FloatingPoint#(e,m),Exception)) fResult_S9 <- mkLFIFO;
+   FIFO#(Bool) tokenFifo <- mkSizedFIFO(9);
+   FIFO#(Tuple2#(FloatingPoint#(e,m),Exception)) fResult_S9 <- mkSizedFIFO(9);
 
    // round result
    rule s9_stage;
-      match { .s, .acc, .out, .guard, .sub } <- toGet(fState_S8).get;
+      match { .s, .acc, .out, .guard, .sub } = rState_S8;
+      let valid = rValid_S8;
 
       if (s.res matches tagged Valid .x) begin
 	 out = x;
@@ -621,12 +652,24 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 	 end
       end
 
-      fResult_S9.enq(tuple2(out,s.exc));
+      if (valid)
+	 fResult_S9.enq(tuple2(out,s.exc));
    endrule
 
-   interface request = toPut(fOperand_S0);
-   interface response = toGet(fResult_S9);
-
+   interface Put request;
+   method Action put(Tuple3#(Maybe#(FloatingPoint#(e,m)),FloatingPoint#(e,m),FloatingPoint#(e,m)) req);
+      wValid_S0 <= True;
+      wOperand_S0 <= req;
+      tokenFifo.enq(True);
+   endmethod
+   endinterface
+   interface Get response;
+      method ActionValue#(Tuple2#(FloatingPoint#(e,m),Exception)) get();
+	 tokenFifo.deq();
+	 fResult_S9.deq();
+	 return fResult_S9.first();
+      endmethod
+   endinterface
 endmodule
 
 ////////////////////////////////////////////////////////////////////////////////
