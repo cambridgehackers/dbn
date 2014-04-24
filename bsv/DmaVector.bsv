@@ -37,6 +37,8 @@ interface VectorSource#(numeric type dsz, type a);
    method ActionValue#(Bool) finish();
 endinterface
 
+function PipeOut#(dtype) vectorSourcePipe(VectorSource#(dsz,dtype) vs); return vs.pipe; endfunction
+
 interface DmaVectorSource#(numeric type dsz, type a);
    interface ObjectReadClient#(dsz) dmaClient;
    interface VectorSource#(dsz, a) vector;
