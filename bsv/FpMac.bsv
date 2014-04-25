@@ -730,204 +730,243 @@ endmodule
 module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), FloatingPoint#(e,m)), Tuple2#(FloatingPoint#(e,m),Exception)))
    provisos(
       // per request of bsc
-      Add#(a__, TLog#(TAdd#(1, TAdd#(TAdd#(m, 1), TAdd#(m, 1)))), TAdd#(e, 1))
+      Add#(a__, TLog#(TAdd#(1, TAdd#(TAdd#(m, 1), TAdd#(m, 1)))), TAdd#(e, 1)),
+      Add#(b__, 16, TAdd#(m, 1))
       );
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S0
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple2#(FloatingPoint#(e,m),
-		 FloatingPoint#(e,m)))                 fOperands_S0        <- mkLFIFO;
+   FIFOF#(Tuple2#(FloatingPoint#(e,m),
+		  FloatingPoint#(e,m)))                 fOperands_S0        <- mkLFIFOF;
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S1 - calculate the new exponent/sign
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple5#(CommonState#(e,m),
-		 Bit#(TAdd#(m,1)),
-		 Bit#(TAdd#(m,1)),
+   Reg#(Tuple5#(CommonState#(e,m),
+		Bit#(TAdd#(m,1)),
+		Bit#(TAdd#(m,1)),
+		Int#(TAdd#(e,2)),
+		Bool)) rState_S1 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S1 <- mkReg(False);
+
+   Reg#(Tuple3#(CommonState#(e,m),
+		Int#(TAdd#(e,2)),
+		Bool)) rState_S2 <- mkReg(unpack(0));
+   Reg#(UInt#(TAdd#(TAdd#(m,1),TAdd#(m,1)))) rsfdres_S2_lsb <- mkReg(0);
+   Reg#(UInt#(TAdd#(TAdd#(m,1),TAdd#(m,1)))) rsfdres_S2_msb <- mkReg(0);
+
+   Reg#(Bool) rValid_S2 <- mkReg(False);
+
+   Reg#(Tuple3#(CommonState#(e,m),
 		 Int#(TAdd#(e,2)),
-		 Bool)) fState_S1 <- mkLFIFO;
+		 Bool)) rState_S3 <- mkReg(unpack(0));
+   Reg#(UInt#(TAdd#(TAdd#(m,1),TAdd#(m,1)))) rsfdres_S3 <- mkReg(0);
+   Reg#(Bool) rValid_S3 <- mkReg(False);
+
+   Reg#(Tuple3#(CommonState#(e,m),
+		FloatingPoint#(e,m),
+		Bit#(2))) rState_S4 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S4 <- mkReg(False);
+
+   FIFO#(Tuple2#(FloatingPoint#(e,m),Exception)) fResult_S5          <- mkLFIFO;
 
    rule s1_stage;
-      match { .opA, .opB } <- toGet(fOperands_S0).get;
+      begin
+	 let req = unpack(0);
+	 let valid = False;
+	 if (fOperands_S0.notEmpty()) begin
+	    req <- toGet(fOperands_S0).get;
+	    valid = True;
+	 end
+	 match { .opA, .opB } = req;
 
-      CommonState#(e,m) s = CommonState {
-	 res: tagged Invalid,
-	 exc: defaultValue,
-	 rmode: rmode
-	 };
+	 CommonState#(e,m) s = CommonState {
+	    res: tagged Invalid,
+	    exc: defaultValue,
+	    rmode: rmode
+	    };
 
-      Int#(TAdd#(e,2)) expA = isSubNormal(opA) ? fromInteger(minexp(opA)) : signExtend(unpack(unbias(opA)));
-      Int#(TAdd#(e,2)) expB = isSubNormal(opB) ? fromInteger(minexp(opB)) : signExtend(unpack(unbias(opB)));
-      Int#(TAdd#(e,2)) newexp = expA + expB;
+	 Int#(TAdd#(e,2)) expA = isSubNormal(opA) ? fromInteger(minexp(opA)) : signExtend(unpack(unbias(opA)));
+	 Int#(TAdd#(e,2)) expB = isSubNormal(opB) ? fromInteger(minexp(opB)) : signExtend(unpack(unbias(opB)));
+	 Int#(TAdd#(e,2)) newexp = expA + expB;
 
-      Bool sign = (opA.sign != opB.sign);
+	 Bool sign = (opA.sign != opB.sign);
 
-      Bit#(TAdd#(m,1)) opAsfd = { getHiddenBit(opA), opA.sfd };
-      Bit#(TAdd#(m,1)) opBsfd = { getHiddenBit(opB), opB.sfd };
+	 Bit#(TAdd#(m,1)) opAsfd = { getHiddenBit(opA), opA.sfd };
+	 Bit#(TAdd#(m,1)) opBsfd = { getHiddenBit(opB), opB.sfd };
 
-      if (isSNaN(opA)) begin
-	 s.res = tagged Valid nanQuiet(opA);
-	 s.exc.invalid_op = True;
+	 if (isSNaN(opA)) begin
+	    s.res = tagged Valid nanQuiet(opA);
+	    s.exc.invalid_op = True;
+	 end
+	 else if (isSNaN(opB)) begin
+	    s.res = tagged Valid nanQuiet(opB);
+	    s.exc.invalid_op = True;
+	 end
+	 else if (isQNaN(opA)) begin
+	    s.res = tagged Valid opA;
+	 end
+	 else if (isQNaN(opB)) begin
+	    s.res = tagged Valid opB;
+	 end
+	 else if ((isInfinity(opA) && isZero(opB)) || (isZero(opA) && isInfinity(opB))) begin
+	    s.res = tagged Valid qnan();
+	    s.exc.invalid_op = True;
+	 end
+	 else if (isInfinity(opA) || isInfinity(opB)) begin
+	    s.res = tagged Valid infinity(opA.sign != opB.sign);
+	 end
+	 else if (isZero(opA) || isZero(opB)) begin
+	    s.res = tagged Valid zero(opA.sign != opB.sign);
+	 end
+	 else if (newexp > fromInteger(maxexp(opA))) begin
+	    FloatingPoint#(e,m) out;
+	    out.sign = (opA.sign != opB.sign);
+	    out.exp = maxBound - 1;
+	    out.sfd = maxBound;
+
+	    s.exc.overflow = True;
+	    s.exc.inexact = True;
+
+	    let y = round(rmode, out, '1);
+	    s.res = tagged Valid tpl_1(y);
+	    s.exc = s.exc | tpl_2(y);
+	 end
+	 else if (newexp < (fromInteger(minexp_subnormal(opA))-2)) begin
+	    FloatingPoint#(e,m) out;
+	    out.sign = (opA.sign != opB.sign);
+	    out.exp = 0;
+	    out.sfd = 0;
+
+	    s.exc.underflow = True;
+	    s.exc.inexact = True;
+
+	    let y = round(rmode, out, 'b01);
+	    s.res = tagged Valid tpl_1(y);
+	    s.exc = s.exc | tpl_2(y);
+	 end
+
+	 rState_S1 <= tuple5(s,
+			     opAsfd,
+			     opBsfd,
+			     newexp,
+			     sign);
+	 rValid_S1 <= valid;
       end
-      else if (isSNaN(opB)) begin
-	 s.res = tagged Valid nanQuiet(opB);
-	 s.exc.invalid_op = True;
-      end
-      else if (isQNaN(opA)) begin
-	 s.res = tagged Valid opA;
-      end
-      else if (isQNaN(opB)) begin
-	 s.res = tagged Valid opB;
-      end
-      else if ((isInfinity(opA) && isZero(opB)) || (isZero(opA) && isInfinity(opB))) begin
-	 s.res = tagged Valid qnan();
-	 s.exc.invalid_op = True;
-      end
-      else if (isInfinity(opA) || isInfinity(opB)) begin
-	 s.res = tagged Valid infinity(opA.sign != opB.sign);
-      end
-      else if (isZero(opA) || isZero(opB)) begin
-	 s.res = tagged Valid zero(opA.sign != opB.sign);
-      end
-      else if (newexp > fromInteger(maxexp(opA))) begin
-	 FloatingPoint#(e,m) out;
-	 out.sign = (opA.sign != opB.sign);
-	 out.exp = maxBound - 1;
-	 out.sfd = maxBound;
-
-	 s.exc.overflow = True;
-	 s.exc.inexact = True;
-
-	 let y = round(rmode, out, '1);
-	 s.res = tagged Valid tpl_1(y);
-	 s.exc = s.exc | tpl_2(y);
-      end
-      else if (newexp < (fromInteger(minexp_subnormal(opA))-2)) begin
-	 FloatingPoint#(e,m) out;
-	 out.sign = (opA.sign != opB.sign);
-	 out.exp = 0;
-	 out.sfd = 0;
-
-	 s.exc.underflow = True;
-	 s.exc.inexact = True;
-
-	 let y = round(rmode, out, 'b01);
-	 s.res = tagged Valid tpl_1(y);
-	 s.exc = s.exc | tpl_2(y);
-      end
-
-      fState_S1.enq(tuple5(s,
-			   opAsfd,
-			   opBsfd,
-			   newexp,
-			   sign));
-   endrule
+   //endrule
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S2
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple4#(CommonState#(e,m),
-		 Bit#(TAdd#(TAdd#(m,1),TAdd#(m,1))),
-		 Int#(TAdd#(e,2)),
-		 Bool)) fState_S2 <- mkLFIFO;
+   //rule s2_stage;
+      begin
+	 match {.s, .opAsfd, .opBsfd, .exp, .sign} = rState_S1;
+	 let valid = rValid_S1;
 
-   rule s2_stage;
-      match {.s, .opAsfd, .opBsfd, .exp, .sign} <- toGet(fState_S1).get;
+	 //Bit#(TAdd#(TAdd#(m,1),TAdd#(m,1))) sfdres = primMul(opAsfd, opBsfd);
+	 UInt#(TAdd#(m,1)) opBsfd_lsb = extend(unpack(opBsfd[15:0]));
+	 UInt#(TSub#(TAdd#(m,1),16)) opBsfd_msb  = unpack(opBsfd[valueOf(TAdd#(m,1))-1:16]);
+	 rsfdres_S2_lsb <= extend(unpack(opAsfd))*extend(opBsfd_lsb);
+	 rsfdres_S2_msb <= extend(unpack(opAsfd))*extend(opBsfd_msb);
 
-      Bit#(TAdd#(TAdd#(m,1),TAdd#(m,1))) sfdres = primMul(opAsfd, opBsfd);
-
-      fState_S2.enq(tuple4(s,
-			   sfdres,
-			   exp,
-			   sign));
-   endrule
+	 rState_S2 <= tuple3(s,
+			     exp,
+			     sign);
+	 rValid_S2 <= valid;
+      end
+   //endrule
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S3
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple4#(CommonState#(e,m),
-		 Bit#(TAdd#(TAdd#(m,1),TAdd#(m,1))),
-		 Int#(TAdd#(e,2)),
-		 Bool)) fState_S3 <- mkLFIFO;
 
-   rule s3_stage;
-      let x <- toGet(fState_S2).get;
-      fState_S3.enq(x);
-   endrule
+   //rule s3_stage;
+      begin
+	 let x = rState_S2;
+	 let valid = rValid_S2;
+	 rsfdres_S3 <= (rsfdres_S2_msb << 16) + rsfdres_S2_lsb;
+	 rState_S3 <= x;
+	 rValid_S3 <= valid;
+      end
+   //endrule
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S4
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple3#(CommonState#(e,m),
-		 FloatingPoint#(e,m),
-		 Bit#(2))) fState_S4 <- mkLFIFO;
+   //rule s4_stage;
+      begin
+	 match {.s, .exp, .sign} = rState_S3;
+	 let sfdres = pack(rsfdres_S3);
+	 let valid = rValid_S3;
 
-   rule s4_stage;
-      match {.s, .sfdres, .exp, .sign} <- toGet(fState_S3).get;
+	 FloatingPoint#(e,m) result = defaultValue;
+	 Bit#(2) guard = ?;
 
-      FloatingPoint#(e,m) result = defaultValue;
-      Bit#(2) guard = ?;
+	 if (s.res matches tagged Invalid) begin
+	    //$display("sfdres = 'h%x", sfdres);
 
-      if (s.res matches tagged Invalid) begin
-	 //$display("sfdres = 'h%x", sfdres);
+	    let shift = fromInteger(minexp(result)) - exp;
+	    if (shift > 0) begin
+	       // subnormal
+	       Bit#(1) sfdlsb = |(sfdres << (fromInteger(valueOf(TAdd#(TAdd#(m,1),TAdd#(m,1)))) - shift));
 
-	 let shift = fromInteger(minexp(result)) - exp;
-	 if (shift > 0) begin
-	    // subnormal
-	    Bit#(1) sfdlsb = |(sfdres << (fromInteger(valueOf(TAdd#(TAdd#(m,1),TAdd#(m,1)))) - shift));
+	       //$display("sfdlsb = |'h%x = 'b%b", (sfdres << (fromInteger(valueOf(TAdd#(TAdd#(m,1),TAdd#(m,1)))) - shift)), sfdlsb);
 
-	    //$display("sfdlsb = |'h%x = 'b%b", (sfdres << (fromInteger(valueOf(TAdd#(TAdd#(m,1),TAdd#(m,1)))) - shift)), sfdlsb);
+               sfdres = sfdres >> shift;
+               sfdres[0] = sfdres[0] | sfdlsb;
 
-            sfdres = sfdres >> shift;
-            sfdres[0] = sfdres[0] | sfdlsb;
+	       result.exp = 0;
+	    end
+	    else begin
+	       result.exp = cExtend(exp + fromInteger(bias(result)));
+	    end
 
-	    result.exp = 0;
+	    // $display("shift = %d", shift);
+	    // $display("sfdres = 'h%x", sfdres);
+	    // $display("result = ", fshow(result));
+	    // $display("exc = 'b%b", pack(exc));
+	    // $display("zeros = %d", countZerosMSB(sfdres));
+
+	    result.sign = sign;
+	    let y = normalize(result, sfdres);
+	    result = tpl_1(y);
+	    guard = tpl_2(y);
+	    s.exc = s.exc | tpl_3(y);
+
+	    // $display("result = ", fshow(result));
+	    // $display("exc = 'b%b", pack(exc));
 	 end
-	 else begin
-	    result.exp = cExtend(exp + fromInteger(bias(result)));
-	 end
 
-	 // $display("shift = %d", shift);
-	 // $display("sfdres = 'h%x", sfdres);
-	 // $display("result = ", fshow(result));
-	 // $display("exc = 'b%b", pack(exc));
-	 // $display("zeros = %d", countZerosMSB(sfdres));
-
-	 result.sign = sign;
-	 let y = normalize(result, sfdres);
-	 result = tpl_1(y);
-	 guard = tpl_2(y);
-	 s.exc = s.exc | tpl_3(y);
-
-	 // $display("result = ", fshow(result));
-	 // $display("exc = 'b%b", pack(exc));
+	 rState_S4 <= tuple3(s,
+			     result,
+			     guard);
+	 rValid_S4 <= valid;
       end
-
-      fState_S4.enq(tuple3(s,
-			   result,
-			   guard));
-   endrule
+   //endrule
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S5
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple2#(FloatingPoint#(e,m),Exception)) fResult_S5          <- mkLFIFO;
 
-   rule s5_stage;
-      match {.s, .rnd, .guard} <- toGet(fState_S4).get;
+   //rule s5_stage;
+      begin
+	 match {.s, .rnd, .guard} = rState_S4;
+	 let valid = rValid_S4;
 
-      FloatingPoint#(e,m) out = rnd;
+	 FloatingPoint#(e,m) out = rnd;
 
-      if (s.res matches tagged Valid .x)
-	 out = x;
-      else begin
-	 let y = round(s.rmode, out, guard);
-	 out = tpl_1(y);
-	 s.exc = s.exc | tpl_2(y);
+	 if (s.res matches tagged Valid .x)
+	    out = x;
+	 else begin
+	    let y = round(s.rmode, out, guard);
+	    out = tpl_1(y);
+	    s.exc = s.exc | tpl_2(y);
+	 end
+
+	 if (valid)
+	    fResult_S5.enq(tuple2(out,s.exc));
       end
-
-      fResult_S5.enq(tuple2(out,s.exc));
    endrule
 
    ////////////////////////////////////////////////////////////////////////////////
