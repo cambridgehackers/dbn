@@ -723,3 +723,219 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
       endmethod
    endinterface
 endmodule
+
+////////////////////////////////////////////////////////////////////////////////
+/// Pipelined Floating Point Multiplier
+////////////////////////////////////////////////////////////////////////////////
+module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), FloatingPoint#(e,m)), Tuple2#(FloatingPoint#(e,m),Exception)))
+   provisos(
+      // per request of bsc
+      Add#(a__, TLog#(TAdd#(1, TAdd#(TAdd#(m, 1), TAdd#(m, 1)))), TAdd#(e, 1))
+      );
+
+   ////////////////////////////////////////////////////////////////////////////////
+   /// S0
+   ////////////////////////////////////////////////////////////////////////////////
+   FIFO#(Tuple2#(FloatingPoint#(e,m),
+		 FloatingPoint#(e,m)))                 fOperands_S0        <- mkLFIFO;
+
+   ////////////////////////////////////////////////////////////////////////////////
+   /// S1 - calculate the new exponent/sign
+   ////////////////////////////////////////////////////////////////////////////////
+   FIFO#(Tuple5#(CommonState#(e,m),
+		 Bit#(TAdd#(m,1)),
+		 Bit#(TAdd#(m,1)),
+		 Int#(TAdd#(e,2)),
+		 Bool)) fState_S1 <- mkLFIFO;
+
+   rule s1_stage;
+      match { .opA, .opB } <- toGet(fOperands_S0).get;
+
+      CommonState#(e,m) s = CommonState {
+	 res: tagged Invalid,
+	 exc: defaultValue,
+	 rmode: rmode
+	 };
+
+      Int#(TAdd#(e,2)) expA = isSubNormal(opA) ? fromInteger(minexp(opA)) : signExtend(unpack(unbias(opA)));
+      Int#(TAdd#(e,2)) expB = isSubNormal(opB) ? fromInteger(minexp(opB)) : signExtend(unpack(unbias(opB)));
+      Int#(TAdd#(e,2)) newexp = expA + expB;
+
+      Bool sign = (opA.sign != opB.sign);
+
+      Bit#(TAdd#(m,1)) opAsfd = { getHiddenBit(opA), opA.sfd };
+      Bit#(TAdd#(m,1)) opBsfd = { getHiddenBit(opB), opB.sfd };
+
+      if (isSNaN(opA)) begin
+	 s.res = tagged Valid nanQuiet(opA);
+	 s.exc.invalid_op = True;
+      end
+      else if (isSNaN(opB)) begin
+	 s.res = tagged Valid nanQuiet(opB);
+	 s.exc.invalid_op = True;
+      end
+      else if (isQNaN(opA)) begin
+	 s.res = tagged Valid opA;
+      end
+      else if (isQNaN(opB)) begin
+	 s.res = tagged Valid opB;
+      end
+      else if ((isInfinity(opA) && isZero(opB)) || (isZero(opA) && isInfinity(opB))) begin
+	 s.res = tagged Valid qnan();
+	 s.exc.invalid_op = True;
+      end
+      else if (isInfinity(opA) || isInfinity(opB)) begin
+	 s.res = tagged Valid infinity(opA.sign != opB.sign);
+      end
+      else if (isZero(opA) || isZero(opB)) begin
+	 s.res = tagged Valid zero(opA.sign != opB.sign);
+      end
+      else if (newexp > fromInteger(maxexp(opA))) begin
+	 FloatingPoint#(e,m) out;
+	 out.sign = (opA.sign != opB.sign);
+	 out.exp = maxBound - 1;
+	 out.sfd = maxBound;
+
+	 s.exc.overflow = True;
+	 s.exc.inexact = True;
+
+	 let y = round(rmode, out, '1);
+	 s.res = tagged Valid tpl_1(y);
+	 s.exc = s.exc | tpl_2(y);
+      end
+      else if (newexp < (fromInteger(minexp_subnormal(opA))-2)) begin
+	 FloatingPoint#(e,m) out;
+	 out.sign = (opA.sign != opB.sign);
+	 out.exp = 0;
+	 out.sfd = 0;
+
+	 s.exc.underflow = True;
+	 s.exc.inexact = True;
+
+	 let y = round(rmode, out, 'b01);
+	 s.res = tagged Valid tpl_1(y);
+	 s.exc = s.exc | tpl_2(y);
+      end
+
+      fState_S1.enq(tuple5(s,
+			   opAsfd,
+			   opBsfd,
+			   newexp,
+			   sign));
+   endrule
+
+   ////////////////////////////////////////////////////////////////////////////////
+   /// S2
+   ////////////////////////////////////////////////////////////////////////////////
+   FIFO#(Tuple4#(CommonState#(e,m),
+		 Bit#(TAdd#(TAdd#(m,1),TAdd#(m,1))),
+		 Int#(TAdd#(e,2)),
+		 Bool)) fState_S2 <- mkLFIFO;
+
+   rule s2_stage;
+      match {.s, .opAsfd, .opBsfd, .exp, .sign} <- toGet(fState_S1).get;
+
+      Bit#(TAdd#(TAdd#(m,1),TAdd#(m,1))) sfdres = primMul(opAsfd, opBsfd);
+
+      fState_S2.enq(tuple4(s,
+			   sfdres,
+			   exp,
+			   sign));
+   endrule
+
+   ////////////////////////////////////////////////////////////////////////////////
+   /// S3
+   ////////////////////////////////////////////////////////////////////////////////
+   FIFO#(Tuple4#(CommonState#(e,m),
+		 Bit#(TAdd#(TAdd#(m,1),TAdd#(m,1))),
+		 Int#(TAdd#(e,2)),
+		 Bool)) fState_S3 <- mkLFIFO;
+
+   rule s3_stage;
+      let x <- toGet(fState_S2).get;
+      fState_S3.enq(x);
+   endrule
+
+   ////////////////////////////////////////////////////////////////////////////////
+   /// S4
+   ////////////////////////////////////////////////////////////////////////////////
+   FIFO#(Tuple3#(CommonState#(e,m),
+		 FloatingPoint#(e,m),
+		 Bit#(2))) fState_S4 <- mkLFIFO;
+
+   rule s4_stage;
+      match {.s, .sfdres, .exp, .sign} <- toGet(fState_S3).get;
+
+      FloatingPoint#(e,m) result = defaultValue;
+      Bit#(2) guard = ?;
+
+      if (s.res matches tagged Invalid) begin
+	 //$display("sfdres = 'h%x", sfdres);
+
+	 let shift = fromInteger(minexp(result)) - exp;
+	 if (shift > 0) begin
+	    // subnormal
+	    Bit#(1) sfdlsb = |(sfdres << (fromInteger(valueOf(TAdd#(TAdd#(m,1),TAdd#(m,1)))) - shift));
+
+	    //$display("sfdlsb = |'h%x = 'b%b", (sfdres << (fromInteger(valueOf(TAdd#(TAdd#(m,1),TAdd#(m,1)))) - shift)), sfdlsb);
+
+            sfdres = sfdres >> shift;
+            sfdres[0] = sfdres[0] | sfdlsb;
+
+	    result.exp = 0;
+	 end
+	 else begin
+	    result.exp = cExtend(exp + fromInteger(bias(result)));
+	 end
+
+	 // $display("shift = %d", shift);
+	 // $display("sfdres = 'h%x", sfdres);
+	 // $display("result = ", fshow(result));
+	 // $display("exc = 'b%b", pack(exc));
+	 // $display("zeros = %d", countZerosMSB(sfdres));
+
+	 result.sign = sign;
+	 let y = normalize(result, sfdres);
+	 result = tpl_1(y);
+	 guard = tpl_2(y);
+	 s.exc = s.exc | tpl_3(y);
+
+	 // $display("result = ", fshow(result));
+	 // $display("exc = 'b%b", pack(exc));
+      end
+
+      fState_S4.enq(tuple3(s,
+			   result,
+			   guard));
+   endrule
+
+   ////////////////////////////////////////////////////////////////////////////////
+   /// S5
+   ////////////////////////////////////////////////////////////////////////////////
+   FIFO#(Tuple2#(FloatingPoint#(e,m),Exception)) fResult_S5          <- mkLFIFO;
+
+   rule s5_stage;
+      match {.s, .rnd, .guard} <- toGet(fState_S4).get;
+
+      FloatingPoint#(e,m) out = rnd;
+
+      if (s.res matches tagged Valid .x)
+	 out = x;
+      else begin
+	 let y = round(s.rmode, out, guard);
+	 out = tpl_1(y);
+	 s.exc = s.exc | tpl_2(y);
+      end
+
+      fResult_S5.enq(tuple2(out,s.exc));
+   endrule
+
+   ////////////////////////////////////////////////////////////////////////////////
+   /// Interface Connections / Methods
+   ////////////////////////////////////////////////////////////////////////////////
+   interface request = toPut(fOperands_S0);
+   interface response = toGet(fResult_S5);
+
+endmodule: mkFPMultiplier
+////////////////////////////////////////////////////////////////////////////////
+
