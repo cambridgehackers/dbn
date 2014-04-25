@@ -14,11 +14,13 @@ typedef Server#(Tuple3#(a,a,RoundMode), Tuple2#(a,Exception)) FloatServer2#(type
 
 
 (* synthesize *)
-module mkFloatAdder(FloatServer2#(Float));
+module mkFloatAdder#(RoundMode rmode)(Server#(Tuple2#(Float,Float),Tuple2#(Float,Exception)));
    let adder <- mkFloatingPointAdder();
    interface Put request;
-      method Action put(Tuple3#(Float,Float,RoundMode) req);
-         adder.request.put(req);
+      method Action put(Tuple2#(Float,Float) req);
+	 match { .a, .b } = req;
+	 let tpl3 = tuple3(a, b, rmode);
+         adder.request.put(tpl3);
       endmethod
    endinterface
    interface Get response;
@@ -30,12 +32,12 @@ module mkFloatAdder(FloatServer2#(Float));
 endmodule
 
 module mkFloatAddPipe#(PipeOut#(Tuple2#(Float,Float)) xypipe)(PipeOut#(Float));
-   let adder <- mkFloatAdder();
+   let adder <- mkFloatAdder(defaultValue);
    FIFOF#(Float) fifo <- mkFIFOF();
    rule consumexy;
       let xy = xypipe.first();
       xypipe.deq;
-      adder.request.put(tuple3(tpl_1(xy),tpl_2(xy),defaultValue));
+      adder.request.put(tuple2(tpl_1(xy),tpl_2(xy)));
    endrule
    rule enqout;
       let resp <- adder.response.get();
@@ -45,10 +47,10 @@ module mkFloatAddPipe#(PipeOut#(Tuple2#(Float,Float)) xypipe)(PipeOut#(Float));
 endmodule
 
 (* synthesize *)
-module mkFloatMultiplier(FloatServer2#(Float));
-   let multiplier <- mkFloatingPointMultiplier();
+module mkFloatMultiplier#(RoundMode rmode)(Server#(Tuple2#(Float, Float), Tuple2#(Float,Exception)));
+   let multiplier <- mkFPMultiplier(rmode);
    interface Put request;
-      method Action put(Tuple3#(Float,Float,RoundMode) req);
+      method Action put(Tuple2#(Float,Float) req);
          multiplier.request.put(req);
       endmethod
    endinterface
