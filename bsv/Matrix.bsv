@@ -48,7 +48,7 @@ typedef 1 NUM_MACS;
 module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 
    let n = valueOf(N);
-   Bool verbose = True;
+   Bool verbose = False;
 
    Reg#(UInt#(20)) numEltsReg <- mkReg(0);
    Reg#(UInt#(20)) countInReg <- mkReg(0);
