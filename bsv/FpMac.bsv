@@ -724,6 +724,7 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
    endinterface
 endmodule
 
+
 ////////////////////////////////////////////////////////////////////////////////
 /// Pipelined Floating Point Multiplier
 ////////////////////////////////////////////////////////////////////////////////
@@ -733,6 +734,8 @@ module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Flo
       Add#(a__, TLog#(TAdd#(1, TAdd#(TAdd#(m, 1), TAdd#(m, 1)))), TAdd#(e, 1)),
       Add#(b__, 16, TAdd#(m, 1))
       );
+
+   let implementSubnormal = False;
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S0
@@ -753,7 +756,8 @@ module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Flo
    Reg#(Tuple3#(CommonState#(e,m),
 		Int#(TAdd#(e,2)),
 		Bool)) rState_S2 <- mkReg(unpack(0));
-   Reg#(Tuple4#(Bool, Bool, Bool, Int#(TAdd#(e,2)))) rCond_S3 <- mkReg(unpack(0));
+   Reg#(Tuple3#(Bool, Bool, Bool)) rCond_S3 <- mkReg(unpack(0));
+   Reg#(Int#(TAdd#(e,2))) rShift_S3 <- mkReg(0);
    Reg#(UInt#(TAdd#(TAdd#(m,1),TAdd#(m,1)))) rsfdres_S2_lsb <- mkReg(0);
    Reg#(UInt#(TAdd#(TAdd#(m,1),TAdd#(m,1)))) rsfdres_S2_msb <- mkReg(0);
 
@@ -909,7 +913,9 @@ module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Flo
 	       inbounds = True;
 	    end
 	 end
-	 rCond_S3 <= tuple4(sresInvalid, subnormal, inbounds, shift);
+	 rCond_S3 <= tuple3(sresInvalid, subnormal, inbounds);
+	 if (implementSubnormal)
+	    rShift_S3 <= shift;
       end
    //endrule
 
@@ -919,7 +925,10 @@ module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Flo
    //rule s4_stage;
       begin
 	 match {.s, .exp, .sign} = rState_S3;
-	 match {.sresInvalid, .subnormal, .inbounds, .shift} = rCond_S3;
+	 match {.sresInvalid, .subnormal, .inbounds} = rCond_S3;
+	 let shift = 0;
+	 if (implementSubnormal)
+	    shift = rShift_S3;
 	 let sfdres = pack(rsfdres_S3);
 	 let valid = rValid_S3;
 
@@ -934,12 +943,17 @@ module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Flo
 	    //if (shift > 0) begin
 	    if (subnormal) begin
 	       // subnormal
-	       Bit#(1) sfdlsb = |(sfdres << (fromInteger(valueOf(TAdd#(TAdd#(m,1),TAdd#(m,1)))) - shift));
+	       if (implementSubnormal) begin
+		  Bit#(1) sfdlsb = |(sfdres << (fromInteger(valueOf(TAdd#(TAdd#(m,1),TAdd#(m,1)))) - shift));
 
-	       //$display("sfdlsb = |'h%x = 'b%b", (sfdres << (fromInteger(valueOf(TAdd#(TAdd#(m,1),TAdd#(m,1)))) - shift)), sfdlsb);
+		  //$display("sfdlsb = |'h%x = 'b%b", (sfdres << (fromInteger(valueOf(TAdd#(TAdd#(m,1),TAdd#(m,1)))) - shift)), sfdlsb);
 
-               sfdres = sfdres >> shift;
-               sfdres[0] = sfdres[0] | sfdlsb;
+		  sfdres = sfdres >> shift;
+		  sfdres[0] = sfdres[0] | sfdlsb;
+	       end
+	       else begin
+		  sfdres = 0;
+	       end
 
 	       result.exp = 0;
 	    end
