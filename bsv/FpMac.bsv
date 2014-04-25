@@ -16,7 +16,7 @@ import PipeMul::*;
 /// Floating point fused multiple accumulate
 ////////////////////////////////////////////////////////////////////////////////
 ///
-/// copied from FloatingPoint.bsv and modified.  
+/// copied from FloatingPoint.bsv and modified.
 /// this version is no longer IEEE compliant :)
 ///
 ////////////////////////////////////////////////////////////////////////////////
@@ -257,7 +257,7 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
       Add#(16, i__, mmbits),
       Add#(j__, TSub#(mbits, 16), mmbits),
       Add#(mmbits,0,48)
-      );   
+      );
 
    FIFOF#(Tuple3#(Maybe#(FloatingPoint#(e,m)),
 		 FloatingPoint#(e,m),
@@ -290,12 +290,13 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
       Int#(ebits))) rState_S3 <- mkReg(unpack(0));
    Reg#(Bool) rValid_S3 <- mkReg(False);
    Reg#(UInt#(mmbits)) rProd_S3 <- mkReg(0);
+   Reg#(Tuple4#(Bool, Bool, Bool, Bool)) rConditions_S3 <- mkReg(unpack(0));
 
-   Reg#(Tuple5#(CommonState#(e,m),
-		 Bool,
-		 FloatingPoint#(e,m),
-		 FloatingPoint#(e,m),
-		 Bit#(2))) rState_S4 <- mkReg(unpack(0));
+   Reg#(CommonState#(e,m)) rState_S4_s <- mkReg(unpack(0));
+   Reg#(Bool) rState_S4_acc <- mkReg(False);
+   Reg#(FloatingPoint#(e,m)) rState_S4_opA <- mkReg(unpack(0));
+   Reg#(FloatingPoint#(e,m)) rState_S4_bc <- mkReg(unpack(0));
+   Reg#(Bit#(2)) rState_S4_guardBC <- mkReg(unpack(0));
    Reg#(Bool) rValid_S4 <- mkReg(False);
 
    Reg#(Tuple8#(CommonState#(e,m),
@@ -406,7 +407,7 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 	    s.res = tagged Valid opA;
 	 end
 
-	 
+
 	 rState_S1 <= tuple7(s,
 			     acc,
 			     opA,
@@ -428,7 +429,7 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 	 UInt#(TSub#(mbits,16)) sfdCmsb = unpack(sfdC[valueOf(mbits)-1:16]);
 	 rProd_S2lsb <= extend(unpack(sfdB))*extend(sfdClsb);
 	 rProd_S2msb <= extend(unpack(sfdB))*extend(sfdCmsb);
-	 
+
 	 rState_S2 <= tuple5(s,
 			     acc,
 			     opA,
@@ -453,22 +454,48 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 			     sgnBC,
 			     expBC);
 	 rValid_S3 <= valid;
+
+
+	 Bool overflow = False;
+	 Bool underflow = False;
+	 Bool inbounds = False;
+	 Bool denorm = False;
+	 let shift = 0;
+	 FloatingPoint#(e,m) bc = defaultValue;
+	 if (s.res matches tagged Invalid) begin
+	    if (expBC > fromInteger(maxexp(bc))) begin
+	       overflow = True;
+	    end
+	    else if (expBC < (fromInteger(minexp_subnormal(bc))-2)) begin
+	       underflow = True;
+	    end
+	    else begin
+	       inbounds = True;
+	       shift = fromInteger(minexp(bc)) - expBC;
+	       if (shift > 0) begin
+		  denorm = True;
+	       end
+	    end
+	 end
+	 rConditions_S3 <= tuple4(overflow, underflow, inbounds, denorm);
       end
    //endrule
 
    // normalize multiplication result
       //rule s4_stage if (fResult_S9.notFull());
       begin
-	 match { .s, .acc, .opA, .sgnBC, .expBC } <- toGet(rState_S3).get;
+	 match { .s, .acc, .opA, .sgnBC, .expBC } = rState_S3;
+	 match { .overflow, .underflow, .inbounds, .denorm } = rConditions_S3;
 	 let valid = rValid_S3;
 
 	 let sfdBC = pack(rProd_S3);
-	 
+
 	 FloatingPoint#(e,m) bc = defaultValue;
 	 Bit#(2) guardBC = ?;
 
-	 if (s.res matches tagged Invalid) begin
-	    if (expBC > fromInteger(maxexp(bc))) begin
+	 //if (s.res matches tagged Invalid) begin
+	 //if (expBC > fromInteger(maxexp(bc))) begin
+	 if (overflow) begin
 	       bc.sign = sgnBC;
 	       bc.exp = maxBound - 1;
 	       bc.sfd = maxBound;
@@ -476,8 +503,9 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 
 	       s.exc.overflow = True;
 	       s.exc.inexact = True;
-	    end
-	    else if (expBC < (fromInteger(minexp_subnormal(bc))-2)) begin
+	 end
+	 //else if (expBC < (fromInteger(minexp_subnormal(bc))-2)) begin
+	 else if (underflow) begin
 	       bc.sign = sgnBC;
 	       bc.exp = 0;
 	       bc.sfd = 0;
@@ -489,34 +517,37 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
 		  s.exc.inexact = True;
 	       end
 	    end
-	    else begin
-	       let shift = fromInteger(minexp(bc)) - expBC;
-	       if (shift > 0) begin
-		  // subnormal
-		  Bit#(1) sfdlsb = |(sfdBC << (fromInteger(valueOf(mmbits)) - shift));
-
-		  sfdBC = sfdBC >> shift;
-		  sfdBC[0] = sfdBC[0] | sfdlsb;
-
-		  bc.exp = 0;
-	       end
-	       else begin
-		  bc.exp = cExtend(expBC + fromInteger(bias(bc)));
-	       end
-
-	       bc.sign = sgnBC;
-	       let y = normalize(bc, sfdBC);
-	       bc = tpl_1(y);
-	       guardBC = tpl_2(y);
-	       s.exc = s.exc | tpl_3(y);
+	 //else begin
+	 else if (inbounds) begin
+	    //if (shift > 0) begin
+	    if (denorm) begin
+	       // subnormal
+	       //Bit#(1) sfdlsb = |(sfdBC << (fromInteger(valueOf(mmbits)) - shift));
+	       //sfdBC = sfdBC >> shift;
+	       //sfdBC[0] = sfdBC[0] | sfdlsb;
+	       //bc.exp = 0;
+	       bc.exp = 0;
+	       sfdBC = 0;
+	       s.exc.underflow = True;
+	       s.exc.inexact = True;
 	    end
-	 end
+	    else begin
+	       bc.exp = cExtend(expBC + fromInteger(bias(bc)));
+	    end
 
-	 rState_S4 <= tuple5(s,
-			     acc,
-			     opA,
-			     bc,
-			     guardBC);
+	    bc.sign = sgnBC;
+	    let y = normalize(bc, sfdBC);
+	    bc = tpl_1(y);
+	    guardBC = tpl_2(y);
+	    s.exc = s.exc | tpl_3(y);
+	 end
+	 //end
+
+	 rState_S4_s <= s;
+	 rState_S4_acc <= acc;
+	 rState_S4_opA <= opA;
+	 rState_S4_bc <= bc;
+	 rState_S4_guardBC <= guardBC;
 	 rValid_S4 <= valid;
       end
    //endrule
@@ -524,7 +555,12 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
    // calculate shift and sign for add
       //rule s5_stage if (fResult_S9.notFull());
       begin
-	 match { .s, .acc, .opA, .opBC, .guardBC } = rState_S4;
+	 //match { .s, .acc, .opA, .opBC, .guardBC } = rState_S4;
+	 let s = rState_S4_s;
+	 let acc = rState_S4_acc;
+	 let opA = rState_S4_opA;
+	 let opBC = rState_S4_bc;
+	 let guardBC = rState_S4_guardBC;
 	 let valid = rValid_S4;
 
 	 Int#(ebits) expA = isSubNormal(opA) ? fromInteger(minexp(opA)) : signExtend(unpack(unbias(opA)));
@@ -687,5 +723,3 @@ module mkFpMac#(RoundMode rmode)(Server#(Tuple3#(Maybe#(FloatingPoint#(e,m)), Fl
       endmethod
    endinterface
 endmodule
-
-////////////////////////////////////////////////////////////////////////////////
