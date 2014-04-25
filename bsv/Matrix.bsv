@@ -48,7 +48,7 @@ typedef 1 NUM_MACS;
 module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 
    let n = valueOf(N);
-   Bool verbose = False;
+   Bool verbose = True;
 
    Reg#(UInt#(20)) numEltsReg <- mkReg(0);
    Reg#(UInt#(20)) countInReg <- mkReg(0);
@@ -56,8 +56,10 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
    Vector#(N,FIFOF#(Bool)) lastFifos <- replicateM(mkFIFOF());
    Vector#(N, PipeOut#(Tuple3#(Bool,Float,Float))) abpipes = map(toPipeOut,abfifos);
 
-   Vector#(NUM_MACS, Server#(Tuple3#(Maybe#(Float), Float, Float), Tuple2#(Float,Exception))) macs <- replicateM(mkFloatMac(defaultValue));
-   Vector#(1, FIFOF#(Bit#(TLog#(N)))) chanFifo <- replicateM(mkFIFOF());
+   Vector#(NUM_MACS, Server#(Tuple2#(Float, Float), Tuple2#(Float,Exception))) muls <- replicateM(mkFloatMultiplier(defaultValue));
+   Vector#(NUM_MACS, Server#(Tuple2#(Float, Float), Tuple2#(Float,Exception))) adders <- replicateM(mkFloatAdder(defaultValue));
+   Vector#(1, FIFOF#(Bit#(TLog#(TAdd#(N,1))))) accumChanFifo <- replicateM(mkFIFOF());
+   Vector#(1, FIFOF#(Bit#(TLog#(N)))) mulChanFifoFifo <- replicateM(mkFIFOF());
    Vector#(N, FIFO#(Float)) accumFifo <- replicateM(mkFIFO());
    Vector#(N, FIFOF#(Float)) resultFifos <- replicateM(mkFIFOF());
 
@@ -70,32 +72,46 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 	 let y = tpl_3(v);
 
 	 Maybe#(Float) accum = tagged Invalid;
-	 if (!isFirst) begin
-	    accum = tagged Valid accumFifo[i].first();
-	    accumFifo[i].deq();
+	 if (isFirst) begin
+	    accumFifo[i].enq(unpack(0));
 	 end
 	 Integer mac_number = i;
 	 if (valueOf(N) > valueOf(NUM_MACS)) begin
-	    chanFifo[0].enq(fromInteger(i));
+	    mulChanFifoFifo[0].enq(fromInteger(i));
 	    mac_number = 0;
 	 end
-         macs[mac_number].request.put(tuple3(accum, x, y));
+         //macs[mac_number].request.put(tuple3(accum, x, y));
+	 muls[mac_number].request.put(tuple2(x, y));
 	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y)
 				       + fshow(" isFirst=") + fshow(isFirst) + fshow(" accum=")+fshow(pack(accum))));
       endrule
    end
 
    for (Integer i = 0; i < valueOf(N); i = i + 1) begin
-      rule macout if ((valueOf(N) == valueOf(NUM_MACS)) || (chanFifo[0].first() == fromInteger(i)));
+      rule startacc if ((valueOf(N) == valueOf(NUM_MACS)) || (mulChanFifoFifo[0].first() == fromInteger(i)));
 	 Integer mac_number = i;
 	 if (valueOf(N) > valueOf(NUM_MACS)) begin
-	    chanFifo[0].deq();
+	    mulChanFifoFifo[0].deq();
+	    mac_number = 0;
+	    accumChanFifo[0].enq(fromInteger(i));
+	 end
+	 let resp <- muls[mac_number].response.get();
+	 let acc <- toGet(accumFifo[i]).get();
+	 adders[mac_number].request.put(tuple2(tpl_1(resp),acc));
+      endrule
+   end
+
+   for (Integer i = 0; i < valueOf(N); i = i + 1) begin
+      rule macout if ((valueOf(N) == valueOf(NUM_MACS)) || (accumChanFifo[0].first() == fromInteger(i)));
+	 Integer mac_number = i;
+	 if (valueOf(N) > valueOf(NUM_MACS)) begin
+	    accumChanFifo[0].deq();
 	    mac_number = 0;
 	 end
 	 let isLast = lastFifos[i].first();
 	 lastFifos[i].deq();
 	 Float vi;
-	 let resp <- macs[mac_number].response.get();
+	 let resp <- adders[mac_number].response.get();
 	 vi = tpl_1(resp);
 	 if (!isLast) begin
 	    accumFifo[i].enq(vi);
@@ -107,14 +123,20 @@ module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
       endrule
    end
 
-   Vector#(N, PipeOut#(Float)) resultPipes = map(toPipeOut, resultFifos);
-   PipeOut#(Vector#(N,Float)) resultPipe <- mkJoinVector(id, resultPipes);
-   PipeOut#(Float) dotpipe <- mkReducePipe(mkFloatAddPipe, resultPipe);
-   PipeOut#(Float) displaydotpipe = (interface PipeOut#(Float);
-      method Float first(); return dotpipe.first(); endmethod
-      method Action deq(); $display(fshow("label=")+fshow(label)+fshow(" dotpipe=")+fshow(dotpipe.first())); dotpipe.deq(); endmethod
-      method Bool notEmpty(); return dotpipe.notEmpty(); endmethod
-      endinterface);
+   //FIXME: works only for N==2
+   rule combine;
+      let a <- toGet(resultFifos[0]).get();
+      let b <- toGet(resultFifos[1]).get();
+      accumChanFifo[0].enq(fromInteger(valueOf(N)));
+      adders[0].request.put(tuple2(a, b));
+   endrule
+   FIFOF#(Float) dotfifo <- mkFIFOF();
+   rule dotprod if (accumChanFifo[0].first == fromInteger(valueOf(N)));
+      accumChanFifo[0].deq();
+      match { .dp, .exc } <- adders[0].response.get();
+      dotfifo.enq(dp);
+   endrule
+   PipeOut#(Float) dotpipe = toPipeOut(dotfifo);
    interface Put request;
       method Action put(Tuple2#(Vector#(N,Float),Vector#(N,Float)) tpl);
 	 Bool isFirst = (countInReg == 0);
