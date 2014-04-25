@@ -15,12 +15,12 @@ typedef Server#(Tuple3#(a,a,RoundMode), Tuple2#(a,Exception)) FloatServer2#(type
 
 (* synthesize *)
 module mkFloatAdder#(RoundMode rmode)(Server#(Tuple2#(Float,Float),Tuple2#(Float,Exception)));
-   let adder <- mkFloatingPointAdder();
+   let adder <- mkFPAdder(rmode);
    interface Put request;
       method Action put(Tuple2#(Float,Float) req);
 	 match { .a, .b } = req;
 	 let tpl3 = tuple3(a, b, rmode);
-         adder.request.put(tpl3);
+         adder.request.put(req);
       endmethod
    endinterface
    interface Get response;

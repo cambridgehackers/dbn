@@ -737,223 +737,253 @@ module mkFPAdder#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Floating
    ////////////////////////////////////////////////////////////////////////////////
    /// S0
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple2#(FloatingPoint#(e,m),
-		 FloatingPoint#(e,m)))                 fOperands_S0        <- mkLFIFO;
+   FIFOF#(Tuple2#(FloatingPoint#(e,m),
+		  FloatingPoint#(e,m)))                 fOperands_S0        <- mkLFIFOF;
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S1 - subtract exponents
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple7#(CommonState#(e,m),
-		 Bit#(TAdd#(m,5)),
-		 Bit#(TAdd#(m,5)),
-		 Bool,
-		 Bool,
-		 Bit#(e),
-		 Bit#(e))) fState_S1 <- mkLFIFO;
+   Reg#(Tuple7#(CommonState#(e,m),
+		Bit#(TAdd#(m,5)),
+		Bit#(TAdd#(m,5)),
+		Bool,
+		Bool,
+		Bit#(e),
+		Bit#(e))) rState_S1 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S1 <- mkReg(False);
+
+   Reg#(Tuple6#(CommonState#(e,m),
+		Bit#(TAdd#(m,5)),
+		Bit#(TAdd#(m,5)),
+		Bool,
+		Bool,
+		Bit#(e))) rState_S2 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S2 <- mkReg(False);
+
+   Reg#(Tuple6#(CommonState#(e,m),
+		Bit#(TAdd#(m,5)),
+		Bit#(TAdd#(m,5)),
+		Bool,
+		Bool,
+		Bit#(e))) rState_S3 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S3 <- mkReg(False);
+
+   Reg#(Tuple4#(CommonState#(e,m),
+		FloatingPoint#(e,m),
+		Bit#(2),
+		Bool)) rState_S4 <- mkReg(unpack(0));
+   Reg#(Bool) rValid_S4 <- mkReg(False);
+
+   FIFO#(Tuple2#(FloatingPoint#(e,m),Exception)) fResult_S5          <- mkLFIFO;
 
    rule s1_stage;
-      match { .opA, .opB } <- toGet(fOperands_S0).get;
+      begin
+	 let req = unpack(0);
+	 let valid = False;
+	 if (fOperands_S0.notEmpty) begin
+	    req <- toGet(fOperands_S0).get;
+	    valid = True;
+	 end
+	 match { .opA, .opB } = req;
+	 CommonState#(e,m) s = CommonState {
+	    res: tagged Invalid,
+	    exc: defaultValue,
+	    rmode: rmode
+	    };
 
-      CommonState#(e,m) s = CommonState {
-	 res: tagged Invalid,
-	 exc: defaultValue,
-	 rmode: rmode
-	 };
+	 Int#(TAdd#(e,2)) expA = isSubNormal(opA) ? fromInteger(minexp(opA)) : signExtend(unpack(unbias(opA)));
+	 Int#(TAdd#(e,2)) expB = isSubNormal(opB) ? fromInteger(minexp(opB)) : signExtend(unpack(unbias(opB)));
 
-      Int#(TAdd#(e,2)) expA = isSubNormal(opA) ? fromInteger(minexp(opA)) : signExtend(unpack(unbias(opA)));
-      Int#(TAdd#(e,2)) expB = isSubNormal(opB) ? fromInteger(minexp(opB)) : signExtend(unpack(unbias(opB)));
+	 Bit#(TAdd#(m,5)) sfdA = {1'b0, getHiddenBit(opA), opA.sfd, 3'b0};
+	 Bit#(TAdd#(m,5)) sfdB = {1'b0, getHiddenBit(opB), opB.sfd, 3'b0};
 
-      Bit#(TAdd#(m,5)) sfdA = {1'b0, getHiddenBit(opA), opA.sfd, 3'b0};
-      Bit#(TAdd#(m,5)) sfdB = {1'b0, getHiddenBit(opB), opB.sfd, 3'b0};
+	 Bit#(TAdd#(m,5)) x;
+	 Bit#(TAdd#(m,5)) y;
+	 Bool sgn;
+	 Bool sub;
+	 Bit#(e) exp;
+	 Bit#(e) expdiff;
 
-      Bit#(TAdd#(m,5)) x;
-      Bit#(TAdd#(m,5)) y;
-      Bool sgn;
-      Bool sub;
-      Bit#(e) exp;
-      Bit#(e) expdiff;
-
-      if ((expB > expA) || ((expB == expA) && (sfdB > sfdA))) begin
-	 exp = opB.exp;
-	 expdiff = truncate(pack(expB - expA));
-	 x = sfdB;
-	 y = sfdA;
-	 sgn = opB.sign;
-	 sub = (opB.sign != opA.sign);
-      end
-      else begin
-	 exp = opA.exp;
-	 expdiff = truncate(pack(expA - expB));
-	 x = sfdA;
-	 y = sfdB;
-	 sgn = opA.sign;
-	 sub = (opA.sign != opB.sign);
-      end
-
-      if (isSNaN(opA)) begin
-	 s.res = tagged Valid nanQuiet(opA);
-	 s.exc.invalid_op = True;
-      end
-      else if (isSNaN(opB)) begin
-	 s.res = tagged Valid nanQuiet(opB);
-	 s.exc.invalid_op = True;
-      end
-      else if (isQNaN(opA)) begin
-	 s.res = tagged Valid opA;
-      end
-      else if (isQNaN(opB)) begin
-	 s.res = tagged Valid opB;
-      end
-      else if (isInfinity(opA) && isInfinity(opB)) begin
-	 if (opA.sign == opB.sign)
-	    s.res = tagged Valid infinity(opA.sign);
+	 if ((expB > expA) || ((expB == expA) && (sfdB > sfdA))) begin
+	    exp = opB.exp;
+	    expdiff = truncate(pack(expB - expA));
+	    x = sfdB;
+	    y = sfdA;
+	    sgn = opB.sign;
+	    sub = (opB.sign != opA.sign);
+	 end
 	 else begin
-	    s.res = tagged Valid qnan();
+	    exp = opA.exp;
+	    expdiff = truncate(pack(expA - expB));
+	    x = sfdA;
+	    y = sfdB;
+	    sgn = opA.sign;
+	    sub = (opA.sign != opB.sign);
+	 end
+
+	 if (isSNaN(opA)) begin
+	    s.res = tagged Valid nanQuiet(opA);
 	    s.exc.invalid_op = True;
 	 end
-      end
-      else if (isInfinity(opA)) begin
-	 s.res = tagged Valid opA;
-      end
-      else if (isInfinity(opB)) begin
-	 s.res = tagged Valid opB;
-      end
+	 else if (isSNaN(opB)) begin
+	    s.res = tagged Valid nanQuiet(opB);
+	    s.exc.invalid_op = True;
+	 end
+	 else if (isQNaN(opA)) begin
+	    s.res = tagged Valid opA;
+	 end
+	 else if (isQNaN(opB)) begin
+	    s.res = tagged Valid opB;
+	 end
+	 else if (isInfinity(opA) && isInfinity(opB)) begin
+	    if (opA.sign == opB.sign)
+	       s.res = tagged Valid infinity(opA.sign);
+	    else begin
+	       s.res = tagged Valid qnan();
+	       s.exc.invalid_op = True;
+	    end
+	 end
+	 else if (isInfinity(opA)) begin
+	    s.res = tagged Valid opA;
+	 end
+	 else if (isInfinity(opB)) begin
+	    s.res = tagged Valid opB;
+	 end
 
-      fState_S1.enq(tuple7(s,
-			   x,
-			   y,
-			   sgn,
-			   sub,
-			   exp,
-			   expdiff));
-   endrule
+	 rState_S1 <= tuple7(s,
+			     x,
+			     y,
+			     sgn,
+			     sub,
+			     exp,
+			     expdiff);
+	 rValid_S1 <= valid;
+      end
+   //endrule
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S2 - align significands
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple6#(CommonState#(e,m),
-		 Bit#(TAdd#(m,5)),
-		 Bit#(TAdd#(m,5)),
-		 Bool,
-		 Bool,
-		 Bit#(e))) fState_S2 <- mkLFIFO;
 
-   rule s2_stage;
-      match {.s, .opA, .opB, .sign, .subtract, .exp, .diff} <- toGet(fState_S1).get;
+   //rule s2_stage;
+      begin
+	 match {.s, .opA, .opB, .sign, .subtract, .exp, .diff} = rState_S1;
+	 let valid = rValid_S1;
 
-      if (s.res matches tagged Invalid) begin
-	 if (diff < fromInteger(valueOf(m) + 5)) begin
-	    Bit#(TAdd#(m,5)) guard = opB;
+	 if (s.res matches tagged Invalid) begin
+	    if (diff < fromInteger(valueOf(m) + 5)) begin
+	       Bit#(TAdd#(m,5)) guard = opB;
 
-	    guard = opB << (fromInteger(valueOf(m) + 5) - diff);
-	    opB = opB >> diff;
-	    opB[0] = opB[0] | (|guard);
+	       guard = opB << (fromInteger(valueOf(m) + 5) - diff);
+	       opB = opB >> diff;
+	       opB[0] = opB[0] | (|guard);
+	    end
+	    else if (|opB == 1) begin
+	       opB = 1;
+	    end
 	 end
-	 else if (|opB == 1) begin
-	    opB = 1;
-	 end
+
+	 rState_S2 <= tuple6(s,
+			     opA,
+			     opB,
+			     sign,
+			     subtract,
+			     exp);
+	 rValid_S2 <= valid;
       end
-
-      fState_S2.enq(tuple6(s,
-			   opA,
-			   opB,
-			   sign,
-			   subtract,
-			   exp));
-   endrule
+   //endrule
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S3 - add/subtract significands
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple6#(CommonState#(e,m),
-		 Bit#(TAdd#(m,5)),
-		 Bit#(TAdd#(m,5)),
-		 Bool,
-		 Bool,
-		 Bit#(e))) fState_S3 <- mkLFIFO;
 
-   rule s3_stage;
-      match {.s, .a, .b, .sign, .subtract, .exp} <- toGet(fState_S2).get;
+   //rule s3_stage;
+      begin
+	 match {.s, .a, .b, .sign, .subtract, .exp} = rState_S2;
+	 let valid = rValid_S2;
 
-      let sum = a + b;
-      let diff = a - b;
+	 let sum = a + b;
+	 let diff = a - b;
 
-      fState_S3.enq(tuple6(s,
-			   sum,
-			   diff,
-			   sign,
-			   subtract,
-			   exp));
-   endrule
+	 rState_S3 <= tuple6(s,
+			     sum,
+			     diff,
+			     sign,
+			     subtract,
+			     exp);
+	 rValid_S3 <= valid;
+      end
+   //endrule
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S4 - normalize
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple4#(CommonState#(e,m),
-		 FloatingPoint#(e,m),
-		 Bit#(2),
-		 Bool)) fState_S4 <- mkLFIFO;
+   //rule s4_stage;
+      begin
+	 match {.s, .addres, .subres, .sign, .subtract, .exp} = rState_S3;
+	 let valid = rValid_S3;
 
-   rule s4_stage;
-      match {.s, .addres, .subres, .sign, .subtract, .exp} <- toGet(fState_S3).get;
+	 FloatingPoint#(e,m) out = defaultValue;
+	 Bit#(2) guard = 0;
 
-      FloatingPoint#(e,m) out = defaultValue;
-      Bit#(2) guard = 0;
+	 if (s.res matches tagged Invalid) begin
+	    Bit#(TAdd#(m,5)) result;
 
-      if (s.res matches tagged Invalid) begin
-	 Bit#(TAdd#(m,5)) result;
+	    if (subtract) begin
+	       result = subres;
+	    end
+	    else begin
+               result = addres;
+	    end
 
-	 if (subtract) begin
-	    result = subres;
+	    out.sign = sign;
+	    out.exp = exp;
+
+	    // $display("out = ", fshow(out));
+	    // $display("result = 'h%x", result);
+	    // $display("zeros = %d", countZerosMSB(result));
+
+	    let y = normalize(out, result);
+	    out = tpl_1(y);
+	    guard = tpl_2(y);
+	    s.exc = s.exc | tpl_3(y);
 	 end
-	 else begin
-            result = addres;
-	 end
 
-	 out.sign = sign;
-	 out.exp = exp;
-
-	 // $display("out = ", fshow(out));
-	 // $display("result = 'h%x", result);
-	 // $display("zeros = %d", countZerosMSB(result));
-
-	 let y = normalize(out, result);
-	 out = tpl_1(y);
-	 guard = tpl_2(y);
-	 s.exc = s.exc | tpl_3(y);
+	 rState_S4 <= tuple4(s,
+			     out,
+			     guard,
+			     subtract);
+	 rValid_S4 <= valid;
       end
-
-      fState_S4.enq(tuple4(s,
-			   out,
-			   guard,
-			   subtract));
-   endrule
+   //endrule
 
    ////////////////////////////////////////////////////////////////////////////////
    /// S5 - round result
    ////////////////////////////////////////////////////////////////////////////////
-   FIFO#(Tuple2#(FloatingPoint#(e,m),Exception)) fResult_S5          <- mkLFIFO;
 
-   rule s5_stage;
-      match {.s, .rnd, .guard, .subtract} <- toGet(fState_S4).get;
+   //rule s5_stage;
+      begin
+	 match {.s, .rnd, .guard, .subtract} = rState_S4;
+	 let valid = rValid_S4;
+	 FloatingPoint#(e,m) out = rnd;
 
-      FloatingPoint#(e,m) out = rnd;
+	 if (s.res matches tagged Valid .x) begin
+	    out = x;
+	 end
+	 else begin
+	    let y = round(s.rmode, out, guard);
+	    out = tpl_1(y);
+	    s.exc = s.exc | tpl_2(y);
+	 end
 
-      if (s.res matches tagged Valid .x) begin
-	 out = x;
+	 // adjust sign for exact zero result
+	 if (isZero(out) && !s.exc.inexact && subtract) begin
+	    out.sign = (s.rmode == Rnd_Minus_Inf);
+	 end
+
+	 if (valid)
+	    fResult_S5.enq(tuple2(out,s.exc));
       end
-      else begin
-	 let y = round(s.rmode, out, guard);
-	 out = tpl_1(y);
-	 s.exc = s.exc | tpl_2(y);
-      end
-
-      // adjust sign for exact zero result
-      if (isZero(out) && !s.exc.inexact && subtract) begin
-	 out.sign = (s.rmode == Rnd_Minus_Inf);
-      end
-
-      fResult_S5.enq(tuple2(out,s.exc));
    endrule
 
    ////////////////////////////////////////////////////////////////////////////////
