@@ -753,6 +753,7 @@ module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Flo
    Reg#(Tuple3#(CommonState#(e,m),
 		Int#(TAdd#(e,2)),
 		Bool)) rState_S2 <- mkReg(unpack(0));
+   Reg#(Tuple4#(Bool, Bool, Bool, Int#(TAdd#(e,2)))) rCond_S3 <- mkReg(unpack(0));
    Reg#(UInt#(TAdd#(TAdd#(m,1),TAdd#(m,1)))) rsfdres_S2_lsb <- mkReg(0);
    Reg#(UInt#(TAdd#(TAdd#(m,1),TAdd#(m,1)))) rsfdres_S2_msb <- mkReg(0);
 
@@ -888,6 +889,27 @@ module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Flo
 	 rsfdres_S3 <= (rsfdres_S2_msb << 16) + rsfdres_S2_lsb;
 	 rState_S3 <= x;
 	 rValid_S3 <= valid;
+
+	 match {.s, .exp, .sign} = x;
+	 FloatingPoint#(e,m) result = defaultValue;
+	 Bit#(2) guard = ?;
+
+	 let sresInvalid = False;
+	 let subnormal = False;
+	 let inbounds = False;
+	 let shift = fromInteger(minexp(result)) - exp;
+	 
+	 if (s.res matches tagged Invalid) begin
+	    sresInvalid = True;
+	    if (shift > 0) begin
+	       subnormal = True;
+	       // subnormal
+	    end
+	    else begin
+	       inbounds = True;
+	    end
+	 end
+	 rCond_S3 <= tuple4(sresInvalid, subnormal, inbounds, shift);
       end
    //endrule
 
@@ -897,17 +919,20 @@ module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Flo
    //rule s4_stage;
       begin
 	 match {.s, .exp, .sign} = rState_S3;
+	 match {.sresInvalid, .subnormal, .inbounds, .shift} = rCond_S3;
 	 let sfdres = pack(rsfdres_S3);
 	 let valid = rValid_S3;
 
 	 FloatingPoint#(e,m) result = defaultValue;
 	 Bit#(2) guard = ?;
 
-	 if (s.res matches tagged Invalid) begin
+	 //if (s.res matches tagged Invalid) begin
+	 if (sresInvalid) begin
 	    //$display("sfdres = 'h%x", sfdres);
 
-	    let shift = fromInteger(minexp(result)) - exp;
-	    if (shift > 0) begin
+	    //let shift = fromInteger(minexp(result)) - exp;
+	    //if (shift > 0) begin
+	    if (subnormal) begin
 	       // subnormal
 	       Bit#(1) sfdlsb = |(sfdres << (fromInteger(valueOf(TAdd#(TAdd#(m,1),TAdd#(m,1)))) - shift));
 
@@ -919,6 +944,7 @@ module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Flo
 	       result.exp = 0;
 	    end
 	    else begin
+	       // inbounds
 	       result.exp = cExtend(exp + fromInteger(bias(result)));
 	    end
 
