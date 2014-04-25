@@ -10,7 +10,8 @@ import Pipe::*;
 import FIFO::*;
 import BUtils::*;
 import PipeMul::*;
-
+import FpMul::*;
+import FpAdd::*;
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Floating point fused multiple accumulate
@@ -1285,5 +1286,85 @@ module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Flo
    interface response = toGet(fResult_S5);
 
 endmodule: mkFPMultiplier
+////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////
+/// Wrap Xilinx FP MUL
+////////////////////////////////////////////////////////////////////////////////
+module mkXilinxFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(Float,Float), Tuple2#(Float,Exception)));
+
+   let clock <- exposeCurrentClock();
+   let reset <- exposeCurrentReset();
+
+   let fpMul <- mkFpMul();
+   Wire#(Bit#(1)) s_axis_ab_ready <- mkDWire(0);
+   Wire#(Bit#(1)) m_axis_tready <- mkDWire(0);
+   rule ab_ready;
+      fpMul.s_axis_a.tvalid(s_axis_ab_ready);
+      fpMul.s_axis_b.tvalid(s_axis_ab_ready);
+   endrule
+   rule c_ready;
+      fpMul.m_axis_result.tready(m_axis_tready);
+   endrule
+
+   ////////////////////////////////////////////////////////////////////////////////
+   /// Interface Connections / Methods
+   ////////////////////////////////////////////////////////////////////////////////
+   interface Put request;
+      method Action put(Tuple2#(Float,Float) req) if (fpMul.s_axis_a.tready() == 1);
+	 match { .a, .b } = req;
+	 fpMul.s_axis_a.tdata(pack(a));
+	 fpMul.s_axis_b.tdata(pack(b));
+	 s_axis_ab_ready <= 1;
+      endmethod
+   endinterface
+   interface Get response;
+      method ActionValue#(Tuple2#(Float,Exception)) get() if (fpMul.m_axis_result.tvalid() == 1);
+	 m_axis_tready <= 1;
+	 return tuple2(unpack(fpMul.m_axis_result.tdata()), defaultValue);
+      endmethod
+   endinterface
+endmodule: mkXilinxFPMultiplier
+////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////
+/// Wrap Xilinx FP ADD
+////////////////////////////////////////////////////////////////////////////////
+module mkXilinxFPAdder#(RoundMode rmode)(Server#(Tuple2#(Float, Float), Tuple2#(Float,Exception)));
+
+   let clock <- exposeCurrentClock();
+   let reset <- exposeCurrentReset();
+
+   let fpAdd <- mkFpAdd();
+   Wire#(Bit#(1)) s_axis_ab_ready <- mkDWire(0);
+   Wire#(Bit#(1)) m_axis_tready <- mkDWire(0);
+   rule ab_ready;
+      fpAdd.s_axis_a.tvalid(s_axis_ab_ready);
+      fpAdd.s_axis_b.tvalid(s_axis_ab_ready);
+      fpAdd.s_axis_operation.tvalid(s_axis_ab_ready);
+   endrule
+   rule c_ready;
+      fpAdd.m_axis_result.tready(m_axis_tready);
+   endrule
+
+   ////////////////////////////////////////////////////////////////////////////////
+   /// Interface Connections / Methods
+   ////////////////////////////////////////////////////////////////////////////////
+   interface Put request;
+      method Action put(Tuple2#(Float,Float) req) if (fpAdd.s_axis_a.tready() == 1);
+	 match { .a, .b } = req;
+	 fpAdd.s_axis_a.tdata(pack(a));
+	 fpAdd.s_axis_b.tdata(pack(b));
+	 fpAdd.s_axis_operation.tdata(0);
+	 s_axis_ab_ready <= 1;
+      endmethod
+   endinterface
+   interface Get response;
+      method ActionValue#(Tuple2#(Float,Exception)) get() if (fpAdd.m_axis_result.tvalid() == 1);
+	 m_axis_tready <= 1;
+	 return tuple2(unpack(fpAdd.m_axis_result.tdata()), defaultValue);
+      endmethod
+   endinterface
+endmodule: mkXilinxFPAdder
 ////////////////////////////////////////////////////////////////////////////////
 
