@@ -57,7 +57,7 @@ endinterface
 import "BVI" fp_add =
 module mkFpAdd(FpAdd);
     default_clock aclk(aclk);
-    default_reset rst(no_reset);
+   no_reset;
     interface FpaddM_axis_result     m_axis_result;
         method m_axis_result_tdata tdata();
         method tready(m_axis_result_tready) enable((*inhigh*) EN_m_axis_result_tready);
