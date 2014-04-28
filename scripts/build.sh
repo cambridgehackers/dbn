@@ -18,10 +18,10 @@ opencv_build_dir=$DBNDIR/../opencv/build
 
 export ANDROID_NDK=/scratch/android-ndk-r9d
 
-#mkdir -p $BUILD_DIR
-#cd $BUILD_DIR
+mkdir -p $BUILD_DIR
+cd $BUILD_DIR
 
 
-RUN_CMAKE="cmake -DOpenCV_DIR=$opencv_build_dir -DCMAKE_TOOLCHAIN_FILE=$opencv_android/android.toolchain.cmake -DANDROID_ABI=armeabi-v7a -DANDROID_NATIVE_API_LEVEL=19 -DBOARD=$BOARD -DXBSVDIR=$XBSVDIR -DDBNDIR=$DBNDIR .. "
+RUN_CMAKE="cmake -DOpenCV_DIR=$opencv_build_dir -DCMAKE_TOOLCHAIN_FILE=$opencv_android/android.toolchain.cmake -DANDROID_ABI=armeabi-v7a -DANDROID_NATIVE_API_LEVEL=19 -DBOARD=$BOARD -DXBSVDIR=$XBSVDIR -DDBNDIR=$DBNDIR ../.. "
 echo $RUN_CMAKE
 $RUN_CMAKE
