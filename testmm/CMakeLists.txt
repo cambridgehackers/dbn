@@ -37,7 +37,7 @@ ENDIF()
 # source files
 #########################################################
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${BOARD}/bin")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${BOARD}/libs/bin")
 
 FILE( GLOB hdrs "${DBNDIR}/cpp/*.h*" )
 FILE( GLOB srcs "testmm.cpp" "${DBNDIR}/cpp/portalmat.cpp"  "${JNIDIR}/*.cpp" ${XBSVDIR}/cpp/portal.cpp ${XBSVDIR}/cpp/PortalMemory.cpp)
