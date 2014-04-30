@@ -36,6 +36,8 @@ typedef 2 K;
 typedef `K_VALUE K;
 `endif
 
+typedef 16 BurstLen;
+
 typedef TMul#(32,N) DmaSz;
 
 typedef enum {

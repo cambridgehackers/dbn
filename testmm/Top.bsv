@@ -46,11 +46,11 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,1))
    MmRequestWrapper mmRequestWrapper <- mkMmRequestWrapper(MmRequestPortal,mm.mmRequest);
    TimerRequestWrapper timerRequestWrapper <- mkTimerRequestWrapper(TimerRequestPortal,mm.timerRequest);
    
-   Vector#(TAdd#(K,J), DmaReadBuffer#(TMul#(32,N),16)) read_buffers <- replicateM(mkDmaReadBuffer);
+   Vector#(TAdd#(K,J), DmaReadBuffer#(TMul#(32,N),BurstLen)) read_buffers <- replicateM(mkDmaReadBuffer);
    zipWithM(mkConnection, mm.readClients, map(ors, read_buffers));
    let readClients = map(orc, read_buffers);
 
-   Vector#(1, DmaWriteBuffer#(TMul#(32,N),16)) write_buffers <- replicateM(mkDmaWriteBuffer);
+   Vector#(1, DmaWriteBuffer#(TMul#(32,N),BurstLen)) write_buffers <- replicateM(mkDmaWriteBuffer);
    zipWithM(mkConnection, mm.writeClients, map(ows,write_buffers));
    let writeClients = map(owc, write_buffers);
 

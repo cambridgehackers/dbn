@@ -29,6 +29,7 @@ import MemwriteEngine::*;
 import Adapter::*;
 import BRAM::*;
 import Pipe::*;
+import RbmTypes::*;
 
 interface VectorSource#(numeric type dsz, type a);
    interface PipeOut#(a) pipe;
@@ -60,7 +61,6 @@ module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
    let asz = valueOf(asz);
    let abytes = valueOf(abytes);
    let ashift = valueOf(ashift);
-   let burstLen = 1;
 
    FIFOF#(Bit#(asz)) dfifo <- mkSizedFIFOF(8);
    MemreadEngine#(asz) memreadEngine <- mkMemreadEngine(2, dfifo);
@@ -69,7 +69,7 @@ module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
    interface VectorSource vector;
        method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
 	  if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
-          memreadEngine.start(p, a << ashift, truncate(l << ashift), (16 << ashift));
+          memreadEngine.start(p, a << ashift, truncate(l << ashift), (fromInteger(valueOf(BurstLen)) << ashift));
        endmethod
       method ActionValue#(Bool) finish();
 	 let b <- memreadEngine.finish();
@@ -109,7 +109,6 @@ module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
    let asz = valueOf(asz);
    let abytes = valueOf(abytes);
    let ashift = valueOf(ashift);
-   let burstLen = 1;
 
    Bool verbose = False;
 
@@ -127,7 +126,7 @@ module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
    interface VectorSink vector;
        method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
 	  if (verbose) $display("DmaVectorSink.start   p=%d offset=%h l=%h", p, a, l);
-	  memwriteEngine.start(p, a << ashift, truncate(l << ashift), 16 << ashift);
+	  memwriteEngine.start(p, a << ashift, truncate(l << ashift), fromInteger(valueOf(BurstLen)) << ashift);
        endmethod
       method ActionValue#(Bool) finish();
 	 let b <- memwriteEngine.finish();
