@@ -232,7 +232,7 @@ void PortalMat::multf(PortalMat &a, PortalMat &b_transpose,  MmIndication *mmind
 		  reference());
     sem_wait(&mul_sem);
     if(mmind)
-      fprintf(stderr, "macs/cycle: %f\n", ((float)(a.rows*a.cols*b_transpose.cols))/((float)mmind->ccnt));
+      fprintf(stderr, "macs/cycle: %f\n", ((float)(a.rows*a.cols*b_transpose.rows))/((float)mmind->ccnt));
 }
 
 void PortalMat::sigmoid(PortalMat &a)
