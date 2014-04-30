@@ -215,7 +215,7 @@ bool PortalMat::compare(Mat &other, const char *file, int line, float epsilon, M
 /*!
  * Multiplies a * b-transpose
  */
-void PortalMat::multf(PortalMat &a, PortalMat &b_transpose)
+void PortalMat::multf(PortalMat &a, PortalMat &b_transpose,  MmIndication *mmind)
 {
     if (a.cols != b_transpose.cols) {
 	fprintf(stderr, "Mismatched matrices: a.rows=%d a.cols=%d b.rows=%d b.cols=%d\n", a.rows, a.cols, b_transpose.rows, b_transpose.cols);
@@ -231,6 +231,8 @@ void PortalMat::multf(PortalMat &a, PortalMat &b_transpose)
 		  b_transpose.reference(), b_transpose.rows, b_transpose.cols,
 		  reference());
     sem_wait(&mul_sem);
+    if(mmind)
+      fprintf(stderr, "macs/cycle: %f\n", ((float)(a.rows*a.cols*b_transpose.cols))/((float)mmind->ccnt));
 }
 
 void PortalMat::sigmoid(PortalMat &a)

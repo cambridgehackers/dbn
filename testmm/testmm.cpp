@@ -131,7 +131,7 @@ int main(int argc, const char **argv)
   PortalMat pm3;
   dumpMat<float>("pm1", "%5.1f", pm1);
   dumpMat<float>("pm2", "%5.1f", pm2);
-  pm3.multf(pm1, pm2);
+  pm3.multf(pm1, pm2,mmdeviceIndication);
   dumpMat<float>("pm1 * pm2", "%5.1f", pm3);
   cv::Mat  m3 = pm1 * pm2.t();
   dumpMat<float>("m1 * m2", "%5.1f", m3);

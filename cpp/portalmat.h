@@ -63,6 +63,7 @@ private:
 };
 
 extern PortalMatAllocator *matAllocator;
+class MmIndication;
 
 class PortalMat : public cv::Mat {
 public:
@@ -83,7 +84,7 @@ public:
   /*!
    * Multiplies a * b-transpose
    */
-  void multf(PortalMat &a, PortalMat &b_transpose);
+  void multf(PortalMat &a, PortalMat &b_transpose, MmIndication *mmind = NULL);
   void sigmoid(PortalMat &a);
   void hiddenStates(PortalMat &a);
   void hiddenStates2(PortalMat &a, PortalMat &rand);
@@ -95,10 +96,13 @@ public:
 class MmIndication : public MmIndicationWrapper
 {
 public:
+  uint64_t ccnt;
  MmIndication(int id) : MmIndicationWrapper(id) {
+    ccnt = 0;
   }
   virtual ~MmIndication() {}
   virtual void mmfDone(uint64_t cycles) {
+    ccnt = cycles;
     sem_post(&mul_sem);
     fprintf(stderr, "mmfDone cycles=%ld\n", cycles);
   }
