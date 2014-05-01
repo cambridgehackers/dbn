@@ -45,52 +45,16 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,1))
    Mm#(N) mm <- mkMm(mmIndicationProxy.ifc, timerIndicationProxy.ifc);
    MmRequestWrapper mmRequestWrapper <- mkMmRequestWrapper(MmRequestPortal,mm.mmRequest);
    TimerRequestWrapper timerRequestWrapper <- mkTimerRequestWrapper(TimerRequestPortal,mm.timerRequest);
+   
+   Vector#(TAdd#(K,J) ,DmaReadBuffer#(TMul#(32,N),16)) read_buffers <- replicateM(mkDmaReadBuffer);
+   zipWithM(mkConnection, mm.readClients, map(ors, read_buffers));
+   let readClients = map(orc, read_buffers);
 
-   let readClients = mm.readClients;
-   Bool buffered = True;
-   if (buffered) begin
-      function Module#(DmaReadBuffer#(TMul#(N,32), 16)) mkBuffer(a x);
-	 return mkDmaReadBuffer();
-      endfunction
-      let buffers <- mapM(mkBuffer, mm.readClients);
-
-      function Module#(Empty) connect(Tuple2#(DmaReadBuffer#(dsz, burstlen), ObjectReadClient#(dsz)) tpl);
-	 return mkConnection(tpl_2(tpl), tpl_1(tpl).dmaServer);
-      endfunction
-      let connections <- mapM(connect, zip(buffers, mm.readClients));
-
-      function ObjectReadClient#(dsz) dmaClient(DmaReadBuffer#(dsz, burstlen) b);
-	 return b.dmaClient;
-      endfunction
-      readClients = map(dmaClient, buffers);
-   end
-   else begin
-      readClients = mm.readClients;
-   end
-
-   let writeClients = mm.writeClients;
-   if (buffered) begin
-      function Module#(DmaWriteBuffer#(TMul#(N,32), 16)) mkBuffer(a x);
-	 return mkDmaWriteBuffer();
-      endfunction
-      let buffers <- mapM(mkBuffer, mm.writeClients);
-
-      function Module#(Empty) connect(Tuple2#(DmaWriteBuffer#(dsz, burstlen), ObjectWriteClient#(dsz)) tpl);
-	 return mkConnection(tpl_2(tpl), tpl_1(tpl).dmaServer);
-      endfunction
-      let connections <- mapM(connect, zip(buffers, mm.writeClients));
-
-      function ObjectWriteClient#(dsz) dmaClient(DmaWriteBuffer#(dsz, burstlen) b);
-	 return b.dmaClient;
-      endfunction
-      writeClients = map(dmaClient, buffers);
-   end
-   else begin
-      writeClients = mm.writeClients;
-   end
+   Vector#(1, DmaWriteBuffer#(TMul#(32,N),16)) write_buffers <- replicateM(mkDmaWriteBuffer);
+   zipWithM(mkConnection, mm.writeClients, map(ows,write_buffers));
+   let writeClients = map(owc, write_buffers);
 
    MemServer#(addrWidth, TMul#(32,N), 1) dma <- mkMemServer(dmaIndicationProxy.ifc, readClients, writeClients);
-
    DmaConfigWrapper dmaConfigWrapper <- mkDmaConfigWrapper(DmaConfigPortal,dma.request);
 
    Vector#(6,StdPortal) portals;
@@ -100,10 +64,7 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,1))
    portals[3] = dmaIndicationProxy.portalIfc; 
    portals[4] = timerRequestWrapper.portalIfc;
    portals[5] = timerIndicationProxy.portalIfc; 
-   
    StdDirectory dir <- mkStdDirectory(portals);
-   
-   // when constructing ctrl and interrupt muxes, directories must be the first argument
    let ctrl_mux <- mkSlaveMux(dir,portals);
    
    interface interrupt = getInterruptVector(portals);
