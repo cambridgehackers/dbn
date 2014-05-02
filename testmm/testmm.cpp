@@ -114,6 +114,8 @@ int main(int argc, const char **argv)
 
   matAllocator = new PortalMatAllocator(dma);
 
+#define LARGE_MAT
+#ifdef LARGE_MAT
   cv::Mat m1 = (cv::Mat_<float>(16,32) <<
 		11,12,13,14,15,16,17,18,11,12,13,14,15,16,17,18,11,12,13,14,15,16,17,18,11,12,13,14,15,16,17,18,
 		21,22,23,24,25,26,27,28,21,22,23,24,25,26,27,28,21,22,23,24,25,26,27,28,21,22,23,24,25,26,27,28,
@@ -150,16 +152,31 @@ int main(int argc, const char **argv)
 		71,72,73,74,75,76,77,78,71,72,73,74,75,76,77,78,71,72,73,74,75,76,77,78,71,72,73,74,75,76,77,78,
 		81,82,83,84,85,86,87,88,81,82,83,84,85,86,87,88,81,82,83,84,85,86,87,88,81,82,83,84,85,86,87,88
 		);
+#else
+  cv::Mat m1 = (cv::Mat_<float>(4,8) <<
+		11,12,13,14,15,16,17,18,
+		21,22,23,24,25,26,27,28,
+		31,32,33,34,35,36,37,38,
+		41,42,43,44,45,46,47,48
+		);
+  cv::Mat m2 = (cv::Mat_<float>(4,8) <<
+		51,62,53,54,55,56,57,58,
+		61,62,63,64,65,66,67,68,
+		71,72,73,74,75,76,77,78,
+		81,82,83,84,85,86,87,88
+		);
+#endif
   PortalMat pm1(m1);
   PortalMat pm2(m2);
   PortalMat pm3;
   //dumpMat<float>("pm1", "%5.1f", pm1);
   //dumpMat<float>("pm2", "%5.1f", pm2);
   pm3.multf(pm1, pm2,mmdeviceIndication);
-  dumpMat<float>("pm1 * pm2", "%5.1f", pm3);
   cv::Mat  m3 = pm1 * pm2.t();
+  dumpMat<float>("pm1 * pm2", "%5.1f", pm3);
   dumpMat<float>("m1 * m2", "%5.1f", m3);
-
+  bool eq = std::equal(m3.begin<float>(), m3.end<float>(), pm3.begin<float>());
+  fprintf(stderr, "eq=%d\n", eq);
   //device->finish();
   exit(0);
 }

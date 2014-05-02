@@ -31,7 +31,7 @@ typedef 1 J;
 typedef `J_VALUE J;
 `endif
 `ifndef K_VALUE
-typedef N K;
+typedef 2 K;
 `else
 typedef `K_VALUE K;
 `endif

@@ -775,7 +775,7 @@ module mkFPAdder#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Floating
 		Bool)) rState_S4 <- mkReg(unpack(0));
    Reg#(Bool) rValid_S4 <- mkReg(False);
 
-   FIFO#(Tuple2#(FloatingPoint#(e,m),Exception)) fResult_S5          <- mkLFIFO;
+   FIFO#(Tuple2#(FloatingPoint#(e,m),Exception)) fResult_S5          <- mkFIFO;
 
    rule s1_stage;
       begin
@@ -1044,7 +1044,7 @@ module mkFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(FloatingPoint#(e,m), Flo
 		Bit#(2))) rState_S4 <- mkReg(unpack(0));
    Reg#(Bool) rValid_S4 <- mkReg(False);
 
-   FIFO#(Tuple2#(FloatingPoint#(e,m),Exception)) fResult_S5          <- mkLFIFO;
+   FIFO#(Tuple2#(FloatingPoint#(e,m),Exception)) fResult_S5  <- mkFIFO;
 
    rule s1_stage;
       begin

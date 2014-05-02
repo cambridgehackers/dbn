@@ -35,6 +35,7 @@ import Pipe::*;
 import FloatOps::*;
 import Timer::*;
 import RbmTypes::*;
+import Assert::*;
 
 interface DotProdServer#(numeric type n);
    interface Reg#(UInt#(20)) numElts;
@@ -42,115 +43,121 @@ interface DotProdServer#(numeric type n);
    interface PipeOut#(Float) pipe;
 endinterface
 
-typedef 1 NUM_MACS;
-
 (* synthesize *)
 module [Module] mkDotProdServer#(UInt#(TLog#(K)) label)(DotProdServer#(N));
 
    let n = valueOf(N);
-   Bool verbose = False;
-
+   let add_depth = valueOf(FP_ADD_DEPTH);
+   let mul_depth = valueOf(FP_MUL_DEPTH);
+   Bool verbose = False; //label==0;
+   
+   Reg#(Bit#(TAdd#(TLog#(FP_ADD_DEPTH),1))) initCnt <- mkReg(0);
+   FIFO#(void) initCtrl <- mkSizedFIFO(1);
+   
    Reg#(UInt#(20)) numEltsReg <- mkReg(0);
    Reg#(UInt#(20)) countInReg <- mkReg(0);
-   Vector#(N,FIFOF#(Tuple3#(Bool,Float,Float))) abfifos <- replicateM(mkFIFOF());
-   Vector#(N,FIFOF#(Bool)) lastFifos <- replicateM(mkFIFOF());
-   Vector#(N, PipeOut#(Tuple3#(Bool,Float,Float))) abpipes = map(toPipeOut,abfifos);
 
-   Vector#(NUM_MACS, Server#(Tuple2#(Float, Float), Tuple2#(Float,Exception))) muls <- replicateM(mkFloatMultiplier(defaultValue));
-   Vector#(NUM_MACS, Server#(Tuple2#(Float, Float), Tuple2#(Float,Exception))) adders <- replicateM(mkFloatAdder(defaultValue));
-   Vector#(1, FIFOF#(Bit#(TLog#(TAdd#(N,1))))) accumChanFifo <- replicateM(mkFIFOF());
-   Vector#(1, FIFOF#(Bit#(TLog#(N)))) mulChanFifoFifo <- replicateM(mkFIFOF());
-   Vector#(N, FIFO#(Float)) accumFifo <- replicateM(mkFIFO());
-   Vector#(N, FIFOF#(Float)) resultFifos <- replicateM(mkFIFOF());
+   Vector#(N, FloatAlu#(FP_MUL_DEPTH)) muls <- replicateM(mkFloatMultiplier(defaultValue));
+   Vector#(N, FloatAlu#(FP_ADD_DEPTH)) adders <- replicateM(mkFloatAdder(defaultValue));
+   
+   Vector#(N,FIFOF#(Tuple2#(Float,Float))) abfifos <- replicateM(mkFIFOF());
+   Vector#(N,FIFOF#(Bool)) lastFifos <- replicateM(mkSizedFIFOF(mul_depth));
 
-   for (Integer i = 0; i < valueOf(N); i = i + 1) begin
+   Vector#(N, Reg#(Bit#(TAdd#(TLog#(FP_ADD_DEPTH),1)))) drainCnts <- replicateM(mkReg(0));
+   Vector#(N, Reg#(Bool)) drained <- replicateM(mkReg(False));
+   
+   Reg#(Maybe#(Float)) accum <- mkReg(Nothing);
+   FIFOF#(Float) dotfifo <- mkFIFOF;
+
+   function Bit#(TLog#(N)) i_v(Integer i) = fromInteger(i);
+   
+   rule init if (initCnt > 0);
+      for(Integer i = 0; i < n; i = i + 1)
+	 adders[i].request.put(tuple2(0,0));
+      initCnt <= initCnt - 1;
+      if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" initCnt=")+fshow(initCnt)));
+   endrule
+   
+   for (Integer i = 0; i < n; i = i + 1)
       rule mul;
-	 let v = abpipes[i].first;
-	 abpipes[i].deq;
-	 let isFirst = tpl_1(v);
-	 let x = tpl_2(v);
-	 let y = tpl_3(v);
-
-	 Maybe#(Float) accum = tagged Invalid;
-	 if (isFirst) begin
-	    accumFifo[i].enq(unpack(0));
-	 end
-	 Integer mac_number = i;
-	 if (valueOf(N) > valueOf(NUM_MACS)) begin
-	    mulChanFifoFifo[0].enq(fromInteger(i));
-	    mac_number = 0;
-	 end
-         //macs[mac_number].request.put(tuple3(accum, x, y));
-	 muls[mac_number].request.put(tuple2(x, y));
-	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" dotprod x=") + fshow(x) + fshow(" y=") + fshow(y)
-				       + fshow(" isFirst=") + fshow(isFirst) + fshow(" accum=")+fshow(pack(accum))));
+	 // this rule could be folded into the 'put' method to reduce latency
+	 match {.x,.y} <- toGet(abfifos[i]).get;
+	 muls[i].request.put(tuple2(x, y));
+	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" mul=")+fshow(i_v(i))));
       endrule
-   end
 
-   for (Integer i = 0; i < valueOf(N); i = i + 1) begin
-      rule startacc if ((valueOf(N) == valueOf(NUM_MACS)) || (mulChanFifoFifo[0].first() == fromInteger(i)));
-	 Integer mac_number = i;
-	 if (valueOf(N) > valueOf(NUM_MACS)) begin
-	    mulChanFifoFifo[0].deq();
-	    mac_number = 0;
-	    accumChanFifo[0].enq(fromInteger(i));
+   for (Integer i = 0; i < n; i = i + 1) 
+      rule acc if (drainCnts[i] == 0 && initCnt == 0);
+	 match {.resp,.*} <- muls[i].response.get();
+	 match {.acc,.*} <- adders[i].response.get;
+	 adders[i].request.put(tuple2(resp,acc));
+	 let last <- toGet(lastFifos[i]).get;
+	 if (last) begin 
+	    if (i>0)
+	       drainCnts[i] <= fromInteger(add_depth);
+	    else
+	       drainCnts[i] <= fromInteger((add_depth*2)-1); // is this correct??
 	 end
-	 let resp <- muls[mac_number].response.get();
-	 let acc <- toGet(accumFifo[i]).get();
-	 adders[mac_number].request.put(tuple2(tpl_1(resp),acc));
+	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" acc=")+fshow(i_v(i))+fshow(" last=")+fshow(last)));
       endrule
-   end
-
-   for (Integer i = 0; i < valueOf(N); i = i + 1) begin
-      rule macout if ((valueOf(N) == valueOf(NUM_MACS)) || (accumChanFifo[0].first() == fromInteger(i)));
-	 Integer mac_number = i;
-	 if (valueOf(N) > valueOf(NUM_MACS)) begin
-	    accumChanFifo[0].deq();
-	    mac_number = 0;
-	 end
-	 let isLast = lastFifos[i].first();
-	 lastFifos[i].deq();
-	 Float vi;
-	 let resp <- adders[mac_number].response.get();
-	 vi = tpl_1(resp);
-	 if (!isLast) begin
-	    accumFifo[i].enq(vi);
-	 end
-	 else begin
-	    resultFifos[i].enq(vi);
-	    if (verbose) $display(fshow("label=")+fshow(label)+fshow(" isLast=")+fshow(isLast)+fshow(" mul=") + fshow(vi));
-	 end
+      
+   for (Integer i = 1; i < n; i = i + 1) 
+      rule gather if (drainCnts[i] > 0);
+	 let new_cnt = drainCnts[i]-1;
+	 drained[i] <= (new_cnt==0);
+	 drainCnts[i] <= new_cnt;
+	 match {.a,.*} <- adders[0].response.get;
+	 match {.b,.*} <- adders[i].response.get;
+	 adders[0].request.put(tuple2(a,b));
+	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" gather=")+fshow(i_v(i))+fshow(" drainCnt=")+fshow(drainCnts[i])));
       endrule
-   end
-
-   //FIXME: works only for N==2
-   rule combine;
-      let a <- toGet(resultFifos[0]).get();
-      let b <- toGet(resultFifos[1]).get();
-      accumChanFifo[0].enq(fromInteger(valueOf(N)));
-      adders[0].request.put(tuple2(a, b));
+   
+   // the reference-guide says this should work, but it doesn't compile:
+   // let gathered = and(tail(drained));
+   function Bool is_true(Bool b) = b;
+   let gathered = all(is_true, readVReg(tail(drained)));
+   // this will only work correctly when add_depth is odd
+   rule drain if (gathered && drainCnts[0] > 0);
+      let new_cnt = drainCnts[0]-1;
+      match {.a,.*} <- adders[0].response.get;
+      drainCnts[0] <= new_cnt;
+      let enq = False;
+      if(accum matches tagged Valid .v) begin
+	 adders[0].request.put(tuple2(a,v));
+	 dynamicAssert(new_cnt > 0, "mkDotProdServer::drain");
+	 enq = True;
+	 accum <= tagged Invalid;
+      end 
+      else begin
+	 if (new_cnt == 0) begin
+	    dotfifo.enq(a);
+	    initCtrl.deq;
+	 end
+	 else 
+	    accum <= tagged Valid a;
+      end
+      if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" drain0=")+fshow(enq)+fshow(" drainCnt=")+fshow(drainCnts[0])));
    endrule
-   FIFOF#(Float) dotfifo <- mkFIFOF();
-   rule dotprod if (accumChanFifo[0].first == fromInteger(valueOf(N)));
-      accumChanFifo[0].deq();
-      match { .dp, .exc } <- adders[0].response.get();
-      dotfifo.enq(dp);
-   endrule
+         
    PipeOut#(Float) dotpipe = toPipeOut(dotfifo);
    interface Put request;
       method Action put(Tuple2#(Vector#(N,Float),Vector#(N,Float)) tpl);
-	 Bool isFirst = (countInReg == 0);
-	 UInt#(20) n = fromInteger(valueOf(N));
-	 let c = countInReg+n;
+	 if (countInReg == 0) begin
+	    initCtrl.enq(?);
+	    initCnt <= fromInteger(add_depth);
+	 end
+	 let c = countInReg+fromInteger(n);
 	 Bool isLast = (c >= numEltsReg);
-	 if (isLast)
+	 if (isLast) begin
 	    c = 0;
+	 end
 	 countInReg <= c;
 	 match { .avec, .bvec } = tpl;
 	 function Action enqvalues(Integer i);
 	    action
-	       abfifos[i].enq(tuple3(isFirst,avec[i], bvec[i]));
+	       abfifos[i].enq(tuple2(avec[i], bvec[i]));
 	       lastFifos[i].enq(isLast);
+	       //if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" countInReg=(")+fshow(countInReg)+fshow("/")+fshow(numEltsReg)+fshow(") dotprod x=") + fshow(avec[i]) + fshow(" y=") + fshow(bvec[i])));
 	    endaction
 	 endfunction
 	 Vector#(N, Integer) indices = genVector();
@@ -271,8 +278,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    let k = valueOf(K);
    let nshift = valueOf(nshift);
    Bool verbose = False;
-   Bool verbose1 = True;
-
+   Bool verbose1 = False;
+   Bool timing = True;
+					
    Reg#(Bool) doneReg <- mkReg(False);
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorA <- mkReg(unpack(0));
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorB <- mkReg(unpack(0));
@@ -322,10 +330,12 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 let startB = col*descriptorB.numColumns; // col major layout (pre-transposed)
 	 let startC = row*descriptorC.numColumns + col; // row major
 	 
-	 if (verbose) $display($format(fshow(cycles)+fshow("    startDotProd xy=")+fshow(tuple2(row,col))
+	 int i_v = fromInteger(i);
+	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    startDotProd xy=")+fshow(tuple2(row,col))
 	    +fshow(" startA=")+fshow(startA)
 	    +fshow(" startB=")+fshow(startB)
-	    +fshow(" startC=")+fshow(startC)));
+	    +fshow(" startC=")+fshow(startC)
+	    +fshow(" k=")+fshow(i_v)));
 
 	 UInt#(TLog#(K)) in = fromInteger(i);
 	 if (i == 0) begin
@@ -473,7 +483,7 @@ module [Module] mkMm#(MmIndication ind, TimerIndication timerInd)(Mm#(N))
    endrule
 
    interface TimerRequest timerRequest;
-         method Action startTimer() if (!timerRunning.notEmpty());
+      method Action startTimer() if (!timerRunning.notEmpty());
 	 cycleCount <= 0;
 	 idleCount <= 0;
 	 timerRunning.enq(True);
