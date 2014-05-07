@@ -327,14 +327,14 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    Vector#(K, Reg#(UInt#(addrwidth))) startBOffset <- replicateM(mkReg(0));
    for (Integer i = 0; i < k; i = i + 1) begin
       FIFO#(UInt#(addrwidth)) startAFifo <- mkFIFO();
-      //FIFO#(UInt#(addrwidth)) startBFifo <- mkFIFO();
+      FIFO#(UInt#(addrwidth)) startBFifo <- mkFIFO();
       FIFO#(UInt#(addrwidth)) startCFifo <- mkFIFO();
       FIFO#(UInt#(addrwidth))    colFifo <- mkFIFO();
       rule startDotProd1;
 	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[i]).get();
-	 match { .startAcheck, .unusedA } <- toGet(offsetpipesA[i]).get();
-	 match { .unusedB, .startBcheck } <- toGet(offsetpipesB[i]).get();
-	 match { .startCcheck, .unusedC } <- toGet(offsetpipesC[i]).get();
+	 match { .startA, .unusedA } <- toGet(offsetpipesA[i]).get();
+	 match { .unusedB, .startBBase } <- toGet(offsetpipesB[i]).get();
+	 match { .startCBase, .unusedC } <- toGet(offsetpipesC[i]).get();
 	 
 	 UInt#(TLog#(K)) in = fromInteger(i);
 	 int i_v = fromInteger(i);
@@ -342,15 +342,12 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 let row = tpl_1(index);
 	 let col = tpl_2(index)+fromInteger(i);
 	 
-	 let startA = row*descriptorA.numColumns; // row major
-	 let startB = col*descriptorB.numColumns; // col major layout (pre-transposed)
-	 let startC = row*descriptorC.numColumns; // + col; // row major
-	 if (startA != startAcheck)
-	    $display("startAmismatch row=%d col=%d startA=%d startAcheck=%d", row, col, startA, startAcheck);
-	 if (startB != (startBcheck + startBOffset[i]))
-	    $display("startBmismatch row=%d col=%d startB=%d startBcheck=%d i=%d", row, col, startB, startBcheck, i_v);
-	 if (startC != startCcheck)
-	    $display("startCmismatch row=%d col=%d startC=%d startCcheck=%d", row, col, startC, startCcheck);
+	 //let startA = row*descriptorA.numColumns; // row major
+	 //let startB = col*descriptorB.numColumns; // col major layout (pre-transposed)
+	 //let startC = row*descriptorC.numColumns + col; // row major
+
+	 let startB = startBBase + startBOffset[i];
+	 let startC = startCBase + col;
 	 
 	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    startDotProd index=")+fshow(tuple2(row,col))
 	    +fshow(" startA=")+fshow(startA)
@@ -365,7 +362,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	    startAFifo.enq(startA);
 	 end
 	 colFifo.enq(col);
-	 //startBFifo.enq(startB);
+	 startBFifo.enq(startB);
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
       endrule
       rule startDotProd2;
@@ -373,7 +370,6 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 let col <- toGet(colFifo).get();
 	 if (i == 0) begin
 	    let startC <- toGet(startCFifo).get();
-	    startC = startC + col;
 	    sinkC.vector.start(descriptorC.pointer, pack(extend(startC>>nshift)), fromInteger(k/n));
 	    if (verbose || verbose1) $display($format(fshow(cycles)+fshow("      sinkC[")+fshow(in)+fshow("].start")+fshow(startC)));
 	 end
@@ -382,7 +378,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	    sourceA[0].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
 	    if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
 	 end
-	 let startB = col*descriptorB.numColumns; // col major layout (pre-transposed)
+	 let startB <- toGet(startBFifo).get();
 	 sourceB[i].start(descriptorB.pointer, pack(extend(startB>>nshift)), pack(extend(descriptorB.numColumns>>nshift)));
       endrule
       if (i == 0)
