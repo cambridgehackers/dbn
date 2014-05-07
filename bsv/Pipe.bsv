@@ -77,6 +77,17 @@ instance MkPipeInOut#(a, Get#(a))
    endmodule
 endinstance
 
+instance ToGet #(PipeOut #(a), a);
+   function Get #(a) toGet (PipeOut #(a) po);
+      return (interface Get;
+                 method ActionValue #(a) get ();
+                    po.deq ();
+                    return po.first ();
+                 endmethod
+              endinterface);
+   endfunction
+endinstance
+
 instance Connectable#(PipeOut#(a),Put#(a));
    module mkConnection#(PipeOut#(a) in, Put#(a) out)(Empty);
       rule connect;
