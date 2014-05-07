@@ -1311,7 +1311,7 @@ module mkXilinxFPMultiplier#(RoundMode rmode)(Server#(Tuple2#(Float,Float), Tupl
    /// Interface Connections / Methods
    ////////////////////////////////////////////////////////////////////////////////
    interface Put request;
-      method Action put(Tuple2#(Float,Float) req) if (fpMul.s_axis_a.tready() == 1);
+      method Action put(Tuple2#(Float,Float) req) if (fpMul.s_axis_a.tready() == 1 && fpMul.s_axis_b.tready() == 1);
 	 match { .a, .b } = req;
 	 fpMul.s_axis_a.tdata(pack(a));
 	 fpMul.s_axis_b.tdata(pack(b));
@@ -1351,7 +1351,7 @@ module mkXilinxFPAdder#(RoundMode rmode)(Server#(Tuple2#(Float, Float), Tuple2#(
    /// Interface Connections / Methods
    ////////////////////////////////////////////////////////////////////////////////
    interface Put request;
-      method Action put(Tuple2#(Float,Float) req) if (fpAdd.s_axis_a.tready() == 1);
+      method Action put(Tuple2#(Float,Float) req) if (fpAdd.s_axis_a.tready() == 1 && fpAdd.s_axis_b.tready() == 1);
 	 match { .a, .b } = req;
 	 fpAdd.s_axis_a.tdata(pack(a));
 	 fpAdd.s_axis_b.tdata(pack(b));
