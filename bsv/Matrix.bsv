@@ -326,9 +326,6 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 
    Vector#(K, Reg#(UInt#(addrwidth))) startBOffset <- replicateM(mkReg(0));
    for (Integer i = 0; i < k; i = i + 1) begin
-      FIFO#(UInt#(addrwidth)) startAFifo <- mkFIFO();
-      FIFO#(UInt#(addrwidth)) startBFifo <- mkFIFO();
-      FIFO#(UInt#(addrwidth)) startCFifo <- mkFIFO();
       FIFO#(UInt#(addrwidth))    colFifo <- mkFIFO();
       rule startDotProd1;
 	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[i]).get();
@@ -355,30 +352,16 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	    +fshow(" startC=")+fshow(startC+col)
 	    +fshow(" k=")+fshow(i_v)));
 
-	 if (i == 0) begin
-	    startCFifo.enq(startC);
-	 end
-	 if (i == 0) begin
-	    startAFifo.enq(startA);
-	 end
-	 colFifo.enq(col);
-	 startBFifo.enq(startB);
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
-      endrule
-      rule startDotProd2;
-	 UInt#(TLog#(K)) in = fromInteger(i);
-	 let col <- toGet(colFifo).get();
+
 	 if (i == 0) begin
-	    let startC <- toGet(startCFifo).get();
 	    sinkC.vector.start(descriptorC.pointer, pack(extend(startC>>nshift)), fromInteger(k/n));
 	    if (verbose || verbose1) $display($format(fshow(cycles)+fshow("      sinkC[")+fshow(in)+fshow("].start")+fshow(startC)));
 	 end
 	 if (i == 0) begin
-	    let startA <- toGet(startAFifo).get();
 	    sourceA[0].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
 	    if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
 	 end
-	 let startB <- toGet(startBFifo).get();
 	 sourceB[i].start(descriptorB.pointer, pack(extend(startB>>nshift)), pack(extend(descriptorB.numColumns>>nshift)));
       endrule
       if (i == 0)
