@@ -306,9 +306,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    MIMO#(K,N,K,Float) dfifo <- mkMIMO(mimoCfg);
    let sinkC <- mkSink(toPipeOut(dfifo));
 
-   XYRangePipeIfc#(UInt#(addrwidth)) xypipeifc <- mkXYRangePipeOut();
+   XYRangePipeIfc#(UInt#(addrwidth)) indexpipeifc <- mkXYRangePipeOut();
 
-   Vector#(TAdd#(K,2), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) xypipes <- mkForkVector(xypipeifc.pipe);
+   Vector#(TAdd#(K,2), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) indexpipes <- mkForkVector(indexpipeifc.pipe);
 
    Reg#(Bool) running <- mkReg(False);
    FIFOF#(Bool) doneFifo <- mkFIFOF();
@@ -324,8 +324,8 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       FIFO#(UInt#(addrwidth)) startCFifo <- mkFIFO();
       FIFO#(UInt#(addrwidth))    colFifo <- mkFIFO();
       rule startDotProd1;
-	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[i].first;
-	 xypipes[i].deq();
+	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = indexpipes[i].first;
+	 indexpipes[i].deq();
 	 
 	 let row = tpl_1(xy);
 	 let col = tpl_2(xy)+fromInteger(i);
@@ -382,8 +382,8 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    end
 
    rule dotProdValue;
-      Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = xypipes[k].first;
-      xypipes[k].deq;
+      Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = indexpipes[k].first;
+      indexpipes[k].deq;
       Vector#(K,Float) vs;
       for (Integer i = 0; i < k; i = i + 1) begin
 	 let v = fxdotprods[i].pipe.first;
@@ -397,8 +397,8 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 
    rule sinkDone;
       // each time we write a burst of k values via sinkC
-      let xy = xypipes[k+1].first;
-      xypipes[k+1].deq;
+      let xy = indexpipes[k+1].first;
+      indexpipes[k+1].deq;
       let b <- sinkC.vector.finish();
       let c = dotprodCount-fromInteger(k);
       if (verbose) $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)+fshow("    xy=")+fshow(xy)));
@@ -423,7 +423,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       if (verbose) $display("mm pointerA=%d pointerB=%d pointerC=%d\n", pointerA, pointerB, pointerC);
       if (verbose) $display("mm.start ra=%d ca=%d rb=%d cb=%d dotprodCount=%d", numRowsA, numColumnsA, numRowsB, numColumnsB, dotprodCount);
       if (verbose) $display($format(fshow("mm.start ")+fshow(xycfg)));
-      xypipeifc.start(xycfg);
+      indexpipeifc.start(xycfg);
       for (Integer i = 0; i < k; i = i + 1) begin
 	 fxdotprods[i].numElts <= truncate(numColumnsA);
       end
