@@ -307,8 +307,14 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    let sinkC <- mkSink(toPipeOut(dfifo));
 
    XYRangePipeIfc#(UInt#(addrwidth)) indexpipeifc <- mkXYRangePipeOut();
+   XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeA <- mkXYRangePipeOut();
+   XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeB <- mkXYRangePipeOut();
+   XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeC <- mkXYRangePipeOut();
 
    Vector#(TAdd#(K,2), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) indexpipes <- mkForkVector(indexpipeifc.pipe);
+   Vector#(K, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesA <- mkForkVector(offsetpipeA.pipe);
+   Vector#(K, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesB <- mkForkVector(offsetpipeB.pipe);
+   Vector#(K, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesC <- mkForkVector(offsetpipeC.pipe);
 
    Reg#(Bool) running <- mkReg(False);
    FIFOF#(Bool) doneFifo <- mkFIFOF();
@@ -318,30 +324,40 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       cycles <= cycles+1;
    endrule
 
+   Vector#(K, Reg#(UInt#(addrwidth))) startBOffset <- replicateM(mkReg(0));
    for (Integer i = 0; i < k; i = i + 1) begin
       FIFO#(UInt#(addrwidth)) startAFifo <- mkFIFO();
       //FIFO#(UInt#(addrwidth)) startBFifo <- mkFIFO();
       FIFO#(UInt#(addrwidth)) startCFifo <- mkFIFO();
       FIFO#(UInt#(addrwidth))    colFifo <- mkFIFO();
       rule startDotProd1;
-	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = indexpipes[i].first;
-	 indexpipes[i].deq();
+	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[i]).get();
+	 match { .startAcheck, .unusedA } <- toGet(offsetpipesA[i]).get();
+	 match { .unusedB, .startBcheck } <- toGet(offsetpipesB[i]).get();
+	 match { .startCcheck, .unusedC } <- toGet(offsetpipesC[i]).get();
 	 
-	 let row = tpl_1(xy);
-	 let col = tpl_2(xy)+fromInteger(i);
+	 UInt#(TLog#(K)) in = fromInteger(i);
+	 int i_v = fromInteger(i);
+
+	 let row = tpl_1(index);
+	 let col = tpl_2(index)+fromInteger(i);
 	 
 	 let startA = row*descriptorA.numColumns; // row major
 	 let startB = col*descriptorB.numColumns; // col major layout (pre-transposed)
 	 let startC = row*descriptorC.numColumns; // + col; // row major
+	 if (startA != startAcheck)
+	    $display("startAmismatch row=%d col=%d startA=%d startAcheck=%d", row, col, startA, startAcheck);
+	 if (startB != (startBcheck + startBOffset[i]))
+	    $display("startBmismatch row=%d col=%d startB=%d startBcheck=%d i=%d", row, col, startB, startBcheck, i_v);
+	 if (startC != startCcheck)
+	    $display("startCmismatch row=%d col=%d startC=%d startCcheck=%d", row, col, startC, startCcheck);
 	 
-	 int i_v = fromInteger(i);
-	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    startDotProd xy=")+fshow(tuple2(row,col))
+	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    startDotProd index=")+fshow(tuple2(row,col))
 	    +fshow(" startA=")+fshow(startA)
 	    +fshow(" startB=")+fshow(startB)
 	    +fshow(" startC=")+fshow(startC+col)
 	    +fshow(" k=")+fshow(i_v)));
 
-	 UInt#(TLog#(K)) in = fromInteger(i);
 	 if (i == 0) begin
 	    startCFifo.enq(startC);
 	 end
@@ -382,14 +398,14 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    end
 
    rule dotProdValue;
-      Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) xy = indexpipes[k].first;
+      Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index = indexpipes[k].first;
       indexpipes[k].deq;
       Vector#(K,Float) vs;
       for (Integer i = 0; i < k; i = i + 1) begin
 	 let v = fxdotprods[i].pipe.first;
 	 fxdotprods[i].pipe.deq;
-	 let xyi = tuple2(tpl_1(xy), tpl_2(xy)+fromInteger(i));
-	 if (verbose) $display($format(fshow(cycles)+fshow("    dotprodvalue xy=")+fshow(xyi)+fshow(" dotprod=")+fshow(v)));
+	 let indexi = tuple2(tpl_1(index), tpl_2(index)+fromInteger(i));
+	 if (verbose) $display($format(fshow(cycles)+fshow("    dotprodvalue index=")+fshow(indexi)+fshow(" dotprod=")+fshow(v)));
 	 vs[i] = v;
       end
       dfifo.enq(fromInteger(k), vs);
@@ -397,11 +413,11 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 
    rule sinkDone;
       // each time we write a burst of k values via sinkC
-      let xy = indexpipes[k+1].first;
+      let index = indexpipes[k+1].first;
       indexpipes[k+1].deq;
       let b <- sinkC.vector.finish();
       let c = dotprodCount-fromInteger(k);
-      if (verbose) $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)+fshow("    xy=")+fshow(xy)));
+      if (verbose) $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)+fshow("    index=")+fshow(index)));
       dotprodCount <= c;
       if (c == 0) begin
 	 running <= False;
@@ -412,8 +428,14 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC) if (!running);
-      XYRangeConfig#(UInt#(addrwidth)) xycfg = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: 1,
-							      ybase: 0, ylimit: numRowsB, ystep: fromInteger(k) };
+      XYRangeConfig#(UInt#(addrwidth)) indexcfg  = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: 1,
+								  ybase: 0, ylimit: numRowsB, ystep: fromInteger(k) };
+      XYRangeConfig#(UInt#(addrwidth)) offsetcfgA = XYRangeConfig {xbase: 0, xlimit: numRowsA*numColumnsA, xstep: numColumnsA,
+								  ybase: 0, ylimit: numRowsB, ystep: fromInteger(k) };
+      XYRangeConfig#(UInt#(addrwidth)) offsetcfgB = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: 1,
+								  ybase: 0, ylimit: numRowsB*numColumnsB, ystep: fromInteger(k)*numColumnsB };
+      XYRangeConfig#(UInt#(addrwidth)) offsetcfgC = XYRangeConfig {xbase: 0, xlimit: numRowsA*numRowsB, xstep: numRowsB,
+								  ybase: 0, ylimit: numRowsB, ystep: fromInteger(k) };
       descriptorA <= MatrixDescriptor { pointer: pointerA, base: 0, numRows: numRowsA, numColumns: numColumnsA};
       descriptorB <= MatrixDescriptor { pointer: pointerB, base: 0, numRows: numRowsB, numColumns: numColumnsB};
       descriptorC <= MatrixDescriptor { pointer: pointerC, base: 0, numRows: numRowsA, numColumns: numRowsB};
@@ -422,10 +444,14 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 
       if (verbose) $display("mm pointerA=%d pointerB=%d pointerC=%d\n", pointerA, pointerB, pointerC);
       if (verbose) $display("mm.start ra=%d ca=%d rb=%d cb=%d dotprodCount=%d", numRowsA, numColumnsA, numRowsB, numColumnsB, dotprodCount);
-      if (verbose) $display($format(fshow("mm.start ")+fshow(xycfg)));
-      indexpipeifc.start(xycfg);
+      if (verbose) $display($format(fshow("mm.start ")+fshow(indexcfg)));
+      indexpipeifc.start(indexcfg);
+      offsetpipeA.start(offsetcfgA);
+      offsetpipeB.start(offsetcfgB);
+      offsetpipeC.start(offsetcfgC);
       for (Integer i = 0; i < k; i = i + 1) begin
 	 fxdotprods[i].numElts <= truncate(numColumnsA);
+	 startBOffset[i] <= fromInteger(i)*numColumnsB;
       end
    endmethod
    method ActionValue#(Bool) finish();
