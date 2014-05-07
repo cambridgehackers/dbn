@@ -141,6 +141,19 @@ module mkForkVector#(PipeOut#(a) inpipe)(Vector#(n, PipeOut#(a)))
    return map(toPipeOut, fifos);
 endmodule
 
+module mkSizedForkVector#(Integer size, PipeOut#(a) inpipe)(Vector#(n, PipeOut#(a)))
+   provisos (Bits#(a, asz));
+   Vector#(n, FIFOF#(a)) fifos <- replicateM(mkSizedFIFOF(size));
+   rule forkelts;
+      let v = inpipe.first();
+      inpipe.deq;
+      for (Integer i = 0; i < valueOf(n); i = i + 1) begin
+	 fifos[i].enq(v);
+      end
+   endrule
+   return map(toPipeOut, fifos);
+endmodule
+
 module mkJoin#(function c f(a av, b bv), PipeOut#(a) apipe, PipeOut#(b) bpipe)(PipeOut#(c));
    method c first();
       let av = apipe.first();
