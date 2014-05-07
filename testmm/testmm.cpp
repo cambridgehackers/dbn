@@ -171,7 +171,16 @@ int main(int argc, const char **argv)
   PortalMat pm3;
   //dumpMat<float>("pm1", "%5.1f", pm1);
   //dumpMat<float>("pm2", "%5.1f", pm2);
+  start_timer(0);
   pm3.multf(pm1, pm2,mmdeviceIndication);
+  uint64_t hw_cycles = lap_timer(0); 
+  uint64_t read_beats = dma->show_mem_stats(ChannelType_Read);
+  uint64_t write_beats = dma->show_mem_stats(ChannelType_Write);
+  float read_util = (float)read_beats/(float)mmdeviceIndication->ccnt;
+  float write_util = (float)write_beats/(float)mmdeviceIndication->ccnt;
+  fprintf(stderr, "memory read beats %ld utilization (beats/cycle): %f\n", read_beats, read_util);
+  fprintf(stderr, "memory write beats %ld utilization (beats/cycle): %f\n", write_beats, write_util);
+
   cv::Mat  m3 = pm1 * pm2.t();
   dumpMat<float>("pm1 * pm2", "%5.1f", pm3);
   dumpMat<float>("m1 * m2", "%5.1f", m3);
