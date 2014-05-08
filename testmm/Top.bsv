@@ -28,7 +28,10 @@ import TimerRequestWrapper::*;
 // defined by user
 import Matrix::*;
 
-module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,1))
+//typedef TAdd#(K,J) NumMasters;
+typedef 1 NumMasters;
+
+module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    provisos (Add#(a__, addrWidth, 40),
 	     Add#(a__, b__, 40),
 	     Add#(addrWidth, c__, 52),
@@ -50,11 +53,11 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,1))
    zipWithM(mkConnection, mm.readClients, map(ors, read_buffers));
    let readClients = map(orc, read_buffers);
 
-   Vector#(1, DmaWriteBuffer#(TMul#(32,N),BurstLen)) write_buffers <- replicateM(mkDmaWriteBuffer);
-   zipWithM(mkConnection, mm.writeClients, map(ows,write_buffers));
+   Vector#(NumMasters, DmaWriteBuffer#(TMul#(32,N),BurstLen)) write_buffers <- replicateM(mkDmaWriteBuffer);
+   zipWithM(mkConnection, mm.writeClients, map(ows,takeAt(0,write_buffers)));
    let writeClients = map(owc, write_buffers);
 
-   MemServer#(addrWidth, TMul#(32,N), 1) dma <- mkMemServer(dmaIndicationProxy.ifc, readClients, writeClients);
+   MemServer#(addrWidth, TMul#(32,N), NumMasters) dma <- mkMemServer(dmaIndicationProxy.ifc, readClients, writeClients);
    DmaConfigWrapper dmaConfigWrapper <- mkDmaConfigWrapper(DmaConfigPortal,dma.request);
 
    Vector#(6,StdPortal) portals;
