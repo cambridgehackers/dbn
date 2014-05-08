@@ -295,10 +295,8 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    Vector#(K, DotProdServer#(N)) fxdotprods <- genWithM(mkFxDotProd);
    for (Integer i = 0; i < k; i = i+1)
       rule connectDotProd;
-	 let a = aPipes[i].first();
-	 aPipes[i].deq();
-	 let b = sourceB[i].pipe.first();
-	 sourceB[i].pipe.deq();
+	 let a <- toGet(aPipes[i]).get();
+	 let b <- toGet(sourceB[i].pipe).get();
 	 fxdotprods[i].request.put(tuple2(a, b));
       endrule
 
