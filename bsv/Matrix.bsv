@@ -263,7 +263,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 				     )(DmaMatrixMultiplyIfc#(addrwidth, dsz))
    provisos (  Add#(N,n__,K)
 	     , Mul#(N,m__,K)
-	     , Add#(1,0,J)
+	     , Add#(1,o__,J)
 	     , Log#(N,nshift)
 	     , FShow#(Float)
 	     , Arith#(Float)
@@ -443,7 +443,7 @@ endmodule
 typedef 20 MMSize;
 
 interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
-   interface Vector#(TAdd#(K,1), ObjectReadClient#(dmasz)) readClients;
+   interface Vector#(TAdd#(K,J), ObjectReadClient#(dmasz)) readClients;
    interface Vector#(1, ObjectWriteClient#(dmasz)) writeClients;
    method Action start(ObjectPointer pointerA, UInt#(MMSize) numRowsA, UInt#(MMSize) numColumnsA,
 		       ObjectPointer pointerB, UInt#(MMSize) numRowsB, UInt#(MMSize) numColumnsB,
@@ -455,8 +455,8 @@ endinterface
 (* synthesize *)
 module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
    Vector#(TAdd#(K,J), DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
-   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = cons(vfsources[0].vector, nil);
-   Vector#(K, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = takeAt(1, map(dmaVectorSourceVector, vfsources));
+   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = takeAt(0,          map(dmaVectorSourceVector, vfsources));
+   Vector#(K, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = takeAt(valueOf(J), map(dmaVectorSourceVector, vfsources));
    DmaMatrixMultiplyIfc#(MMSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
    interface Vector readClients = map(getSourceReadClient, vfsources);
    interface Vector writeClients = cons(dmaMMF.dmaClient, nil);
