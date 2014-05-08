@@ -237,7 +237,7 @@ typedef struct {
 
 // row major layout
 interface DmaMatrixMultiplyIfc#(numeric type addrwidth, numeric type dsz);
-   interface ObjectWriteClient#(dsz) dmaClient;
+   interface Vector#(J, ObjectWriteClient#(dsz)) writeClients;
    method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC);
@@ -275,7 +275,8 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       );
 
    let n = valueOf(N);
-   let k = valueOf(K);
+   let jj = valueOf(J);
+   let kk = valueOf(K);
    let nshift = valueOf(nshift);
    Bool verbose = False;
    Bool verbose1 = False;
@@ -287,29 +288,34 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorC <- mkReg(unpack(0));
    Reg#(UInt#(addrwidth)) dotprodCount <- mkReg(0);
 
-   Vector#(K, PipeOut#(Vector#(N,Float))) aPipes <- mkSizedForkVector(valueOf(SourceBufferSize), sourceA[0].pipe);
+   Vector#(J, Vector#(K, PipeOut#(Vector#(N,Float)))) aPipes <- mapM(mkSizedForkVector(valueOf(SourceBufferSize)), map(vectorSourcePipe, sourceA));
 
    function Module#(DotProdServer#(N)) mkFxDotProd(Integer i);
       return mkDotProdServer(fromInteger(i));
    endfunction
    Vector#(K, DotProdServer#(N)) fxdotprods <- genWithM(mkFxDotProd);
-   for (Integer i = 0; i < k; i = i+1)
-      rule connectDotProd;
-	 let a <- toGet(aPipes[i]).get();
-	 let b <- toGet(sourceB[i].pipe).get();
-	 fxdotprods[i].request.put(tuple2(a, b));
-      endrule
-
+   for (Integer k = 0; k < kk; k = k+1) begin
+      Vector#(J, PipeOut#(Vector#(N,Float))) bPipes <- mkForkVector(sourceB[k].pipe);
+      for (Integer j = 0; j < jj; j = j + 1) begin
+	 rule connectDotProd;
+	    let index = j*kk+k;
+	    let a <- toGet(aPipes[j][k]).get();
+	    let b <- toGet(bPipes[k]).get();
+	    fxdotprods[index].request.put(tuple2(a, b));
+	 endrule
+      end
+   end
    MIMOConfiguration mimoCfg = defaultValue;
-   MIMO#(K,N,K,Float) dfifo <- mkMIMO(mimoCfg);
-   let sinkC <- mkSink(toPipeOut(dfifo));
+   MIMO#(K,N,2,Float) dfifo <- mkMIMO(mimoCfg);
+   Vector#(J, MIMO#(K,N,2,Float)) dfifos <- replicateM(mkMIMO(mimoCfg));
+   let sinks <- mapM(mkSink, map(toPipeOut, dfifos));
 
    XYRangePipeIfc#(UInt#(addrwidth)) indexpipeifc <- mkXYRangePipeOut();
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeA <- mkXYRangePipeOut();
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeB <- mkXYRangePipeOut();
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeC <- mkXYRangePipeOut();
 
-   Vector#(TAdd#(K,2), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) indexpipes <- mkSizedForkVector(valueOf(SourceBufferSize), indexpipeifc.pipe);
+   Vector#(TAdd#(TAdd#(J,K),2), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) indexpipes <- mkSizedForkVector(valueOf(SourceBufferSize), indexpipeifc.pipe);
    Vector#(K, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesA <- mkSizedForkVector(valueOf(SourceBufferSize), offsetpipeA.pipe);
    Vector#(K, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesB <- mkSizedForkVector(valueOf(SourceBufferSize), offsetpipeB.pipe);
    Vector#(K, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesC <- mkSizedForkVector(valueOf(SourceBufferSize), offsetpipeC.pipe);
@@ -323,96 +329,99 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    endrule
 
    Vector#(K, Reg#(UInt#(addrwidth))) startBOffset <- replicateM(mkReg(0));
-   for (Integer i = 0; i < k; i = i + 1) begin
-      FIFO#(UInt#(addrwidth))    colFifo <- mkFIFO();
-      rule startDotProd1;
-	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[i]).get();
-	 match { .startA, .unusedA } <- toGet(offsetpipesA[i]).get();
-	 match { .unusedB, .startBBase } <- toGet(offsetpipesB[i]).get();
-	 match { .startCBase, .unusedC } <- toGet(offsetpipesC[i]).get();
+   for (Integer k = 0; k < kk; k = k + 1) begin
+      rule startDotProds;
+	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[k]).get();
+	 match { .unusedB, .startBBase } <- toGet(offsetpipesB[k]).get();
 	 
-	 UInt#(TLog#(K)) in = fromInteger(i);
-	 int i_v = fromInteger(i);
+	 int kint = fromInteger(k);
 
 	 let row = tpl_1(index);
-	 let col = tpl_2(index)+fromInteger(i);
+	 let col = tpl_2(index)+fromInteger(k);
 	 
-	 //let startA = row*descriptorA.numColumns; // row major
-	 //let startB = col*descriptorB.numColumns; // col major layout (pre-transposed)
-	 //let startC = row*descriptorC.numColumns + col; // row major
-
-	 let startB = startBBase + startBOffset[i];
-	 let startC = startCBase + col;
+	 let startB = startBBase + startBOffset[k];
 	 
 	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    startDotProd index=")+fshow(tuple2(row,col))
-	    +fshow(" startA=")+fshow(startA)
 	    +fshow(" startB=")+fshow(startB)
-	    +fshow(" startC=")+fshow(startC+col)
-	    +fshow(" k=")+fshow(i_v)));
+	    +fshow(" k=")+fshow(kint)));
 
-	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].start")+fshow(startB)));
+	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(kint)+fshow("].start")+fshow(startB)));
 
-	 if (i == 0) begin
-	    sinkC.vector.start(descriptorC.pointer, pack(extend(startC>>nshift)), fromInteger(k/n));
-	    if (verbose || verbose1) $display($format(fshow(cycles)+fshow("      sinkC[")+fshow(in)+fshow("].start")+fshow(startC)));
-	 end
-	 if (i == 0) begin
-	    sourceA[0].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
-	    if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
-	 end
-	 sourceB[i].start(descriptorB.pointer, pack(extend(startB>>nshift)), pack(extend(descriptorB.numColumns>>nshift)));
+	 sourceB[k].start(descriptorB.pointer, pack(extend(startB>>nshift)), pack(extend(descriptorB.numColumns>>nshift)));
       endrule
-      if (i == 0)
-	 rule finishSourceA;
-	    if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[0].finish ")));
-	    let b <- sourceA[0].finish();
-	 endrule
       rule finishSourceB;
-	 UInt#(TLog#(K)) in = fromInteger(i);
-	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(in)+fshow("].finish")));
-	 let b <- sourceB[i].finish();
+	 UInt#(TLog#(K)) in = fromInteger(k);
+	 int kint = fromInteger(k);
+	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(kint)+fshow("].finish")));
+	 let b <- sourceB[k].finish();
       endrule
    end
+   for (Integer j = 0; j < jj; j = j + 1) begin
 
-   rule dotProdValue;
-      Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index = indexpipes[k].first;
-      indexpipes[k].deq;
-      Vector#(K,Float) vs;
-      for (Integer i = 0; i < k; i = i + 1) begin
-	 let v = fxdotprods[i].pipe.first;
-	 fxdotprods[i].pipe.deq;
-	 let indexi = tuple2(tpl_1(index), tpl_2(index)+fromInteger(i));
-	 if (verbose) $display($format(fshow(cycles)+fshow("    dotprodvalue index=")+fshow(indexi)+fshow(" dotprod=")+fshow(v)));
-	 vs[i] = v;
-      end
-      dfifo.enq(fromInteger(k), vs);
-   endrule
+      rule startSourceAndSink;
+	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[j+kk]).get();
 
-   rule sinkDone;
-      // each time we write a burst of k values via sinkC
-      let index = indexpipes[k+1].first;
-      indexpipes[k+1].deq;
-      let b <- sinkC.vector.finish();
-      let c = dotprodCount-fromInteger(k);
-      if (verbose) $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)+fshow("    index=")+fshow(index)));
-      dotprodCount <= c;
-      if (c == 0) begin
-	 running <= False;
-	 doneFifo.enq(?);
-      end
-   endrule
+	 let row = tpl_1(index)+fromInteger(j);
+	 let col = tpl_2(index);
+
+	 match { .startA, .unusedA } <- toGet(offsetpipesA[j]).get();
+	 match { .startCBase, .unusedC } <- toGet(offsetpipesC[j]).get();
+	 let startC = startCBase + col;
+
+	 int jint = fromInteger(j);
+	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    startDotProd index=")+fshow(tuple2(row,col))
+	    +fshow(" startA=")+fshow(startA)
+	    +fshow(" startC=")+fshow(startC+col)
+	    +fshow(" j=")+fshow(jint)));
+
+	 sourceA[j].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
+	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[0].start")+fshow(startA)));
+	 sinks[j].vector.start(descriptorC.pointer, pack(extend(startC>>nshift)), fromInteger(kk/n));
+	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("      sinks[")+fshow(jint)+fshow("].start")+fshow(startC)));
+      endrule
+
+      rule finishSourceA;
+	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[0].finish ")));
+	 let b <- sourceA[j].finish();
+      endrule
+
+      rule dotProdValue;
+	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[jj+kk]).get();
+	 Vector#(K,Float) vs;
+	 for (Integer k = 0; k < kk; k = k + 1) begin
+	    let v <- toGet(fxdotprods[k].pipe).get();
+	    let indexi = tuple2(tpl_1(index), tpl_2(index)+fromInteger(k));
+	    if (verbose) $display($format(fshow(cycles)+fshow("    dotprodvalue index=")+fshow(indexi)+fshow(" dotprod=")+fshow(v)));
+	    vs[k] = v;
+	 end
+	 dfifos[j].enq(fromInteger(kk), vs);
+      endrule
+
+      rule sinkDone;
+	 // each time we write a burst of k values via sinks
+	 let index <- toGet(indexpipes[jj+kk+1]).get();
+	 let b <- sinks[j].vector.finish();
+	 let c = dotprodCount-fromInteger(kk);
+	 if (verbose) $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)+fshow("    index=")+fshow(index)));
+	 dotprodCount <= c;
+	 if (c == 0) begin
+	    running <= False;
+	    doneFifo.enq(?);
+	 end
+      endrule
+   end
 
    method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC) if (!running);
-      XYRangeConfig#(UInt#(addrwidth)) indexcfg  = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: 1,
-								  ybase: 0, ylimit: numRowsB, ystep: fromInteger(k) };
+      XYRangeConfig#(UInt#(addrwidth)) indexcfg  = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: fromInteger(jj),
+								  ybase: 0, ylimit: numRowsB, ystep: fromInteger(kk) };
       XYRangeConfig#(UInt#(addrwidth)) offsetcfgA = XYRangeConfig {xbase: 0, xlimit: numRowsA*numColumnsA, xstep: numColumnsA,
-								  ybase: 0, ylimit: numRowsB, ystep: fromInteger(k) };
-      XYRangeConfig#(UInt#(addrwidth)) offsetcfgB = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: 1,
-								  ybase: 0, ylimit: numRowsB*numColumnsB, ystep: fromInteger(k)*numColumnsB };
+								  ybase: 0, ylimit: numRowsB, ystep: fromInteger(kk) };
+      XYRangeConfig#(UInt#(addrwidth)) offsetcfgB = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: fromInteger(jj),
+								  ybase: 0, ylimit: numRowsB*numColumnsB, ystep: fromInteger(kk)*numColumnsB };
       XYRangeConfig#(UInt#(addrwidth)) offsetcfgC = XYRangeConfig {xbase: 0, xlimit: numRowsA*numRowsB, xstep: numRowsB,
-								  ybase: 0, ylimit: numRowsB, ystep: fromInteger(k) };
+								  ybase: 0, ylimit: numRowsB, ystep: fromInteger(kk) };
       descriptorA <= MatrixDescriptor { pointer: pointerA, base: 0, numRows: numRowsA, numColumns: numColumnsA};
       descriptorB <= MatrixDescriptor { pointer: pointerB, base: 0, numRows: numRowsB, numColumns: numColumnsB};
       descriptorC <= MatrixDescriptor { pointer: pointerC, base: 0, numRows: numRowsA, numColumns: numRowsB};
@@ -426,9 +435,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       offsetpipeA.start(offsetcfgA);
       offsetpipeB.start(offsetcfgB);
       offsetpipeC.start(offsetcfgC);
-      for (Integer i = 0; i < k; i = i + 1) begin
-	 fxdotprods[i].numElts <= truncate(numColumnsA);
-	 startBOffset[i] <= fromInteger(i)*numColumnsB;
+      for (Integer k = 0; k < kk; k = k + 1) begin
+	 fxdotprods[k].numElts <= truncate(numColumnsA);
+	 startBOffset[k] <= fromInteger(k)*numColumnsB;
       end
    endmethod
    method ActionValue#(Bool) finish();
@@ -437,14 +446,14 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       return True;
    endmethod
 
-   interface ObjectWriteClient dmaClient = sinkC.dmaClient;
+   interface Vector writeClients = map(getSinkWriteClient, sinks);
 endmodule
 
 typedef 20 MMSize;
 
 interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
    interface Vector#(TAdd#(K,J), ObjectReadClient#(dmasz)) readClients;
-   interface Vector#(1, ObjectWriteClient#(dmasz)) writeClients;
+   interface Vector#(J, ObjectWriteClient#(dmasz)) writeClients;
    method Action start(ObjectPointer pointerA, UInt#(MMSize) numRowsA, UInt#(MMSize) numColumnsA,
 		       ObjectPointer pointerB, UInt#(MMSize) numRowsB, UInt#(MMSize) numColumnsB,
 		       ObjectPointer pointerC);
@@ -459,7 +468,7 @@ module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
    Vector#(K, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = takeAt(valueOf(J), map(dmaVectorSourceVector, vfsources));
    DmaMatrixMultiplyIfc#(MMSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
    interface Vector readClients = map(getSourceReadClient, vfsources);
-   interface Vector writeClients = cons(dmaMMF.dmaClient, nil);
+   interface Vector writeClients = dmaMMF.writeClients;
    method start = dmaMMF.start;
    method finish = dmaMMF.finish;
    method Bit#(32) dbg();

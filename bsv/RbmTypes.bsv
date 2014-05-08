@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 `ifndef N_VALUE
-typedef 2 N;
+typedef 1 N;
 `else
 typedef `N_VALUE N;
 `endif
@@ -31,7 +31,7 @@ typedef 1 J;
 typedef `J_VALUE J;
 `endif
 `ifndef K_VALUE
-typedef 4 K;
+typedef 1 K;
 `else
 typedef `K_VALUE K;
 `endif
