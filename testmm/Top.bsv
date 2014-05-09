@@ -53,7 +53,7 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    zipWithM(mkConnection, mm.readClients, map(ors, read_buffers));
    let readClients = map(orc, read_buffers);
 
-   Vector#(NumMasters, DmaWriteBuffer#(TMul#(32,N),BurstLen)) write_buffers <- replicateM(mkDmaWriteBuffer);
+   Vector#(J, DmaWriteBuffer#(TMul#(32,N),BurstLen)) write_buffers <- replicateM(mkDmaWriteBuffer);
    zipWithM(mkConnection, mm.writeClients, map(ows,takeAt(0,write_buffers)));
    let writeClients = map(owc, write_buffers);
 
