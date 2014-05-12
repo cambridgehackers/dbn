@@ -36,6 +36,7 @@ import FloatOps::*;
 import Timer::*;
 import RbmTypes::*;
 import Assert::*;
+import Connectable::*;
 
 interface DotProdServer#(numeric type n);
    interface Reg#(UInt#(20)) numElts;
@@ -168,6 +169,10 @@ module [Module] mkDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(DotProdServer#(
    interface Reg numElts = numEltsReg;
 endmodule : mkDotProdServer
 
+function Vector#(TMul#(j,k), etype) flattenMatrix(Vector#(j, Vector#(k, etype)) mat);
+   function etype flatten(Integer i); return mat[i/valueOf(k)][i%valueOf(k)]; endfunction
+   return genWith(flatten);
+endfunction
 
 typedef struct {
    a xbase;
@@ -295,7 +300,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       return mkDotProdServer(fromInteger(i));
    endfunction
    Vector#(TMul#(J,K), DotProdServer#(N)) fxdotprods <- genWithM(mkFxDotProd);
-//`define LOCKSTEP
+`define LOCKSTEP
 `ifndef LOCKSTEP
    for (Integer k = 0; k < kk; k = k+1) begin
       for (Integer j = 0; j < jj; j = j + 1) begin
@@ -311,19 +316,11 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       end
    end
 `else
-   rule connectDotProd;
-      for (Integer k = 0; k < kk; k = k+1) begin
-	 for (Integer j = 0; j < jj; j = j + 1) begin
-	    let index = j*kk+k;
-	    let a <- toGet(aPipes[j][k]).get();
-	    let b <- toGet(bPipes[j][k]).get();
-	    int jint = fromInteger(j);
-	    int kint = fromInteger(k);
-	    //$display($format(fshow("connectDotProd pos=")+fshow(tuple2(jint,kint))+fshow(" a=")+fshow(pack(a))+fshow(" b=")+fshow(pack(b))));
-	    fxdotprods[index].request.put(tuple2(a, b));
-	 end
-      end
-   endrule
+   Vector#(TMul#(J,K), PipeOut#(Vector#(N,Float))) aPipeVec = flattenMatrix(aPipes);
+   Vector#(TMul#(J,K), PipeOut#(Vector#(N,Float))) bPipeVec = flattenMatrix(bPipes);
+   Vector#(TMul#(J,K), PipeOut#(Tuple2#(Vector#(N,Float),Vector#(N,Float)))) abPipeVec = map(uncurry(zipPipeOut), zip(aPipeVec, bPipeVec));
+   function Put#(Tuple2#(Vector#(n,Float),Vector#(n,Float))) getRequestInterface(DotProdServer#(n) s); return s.request; endfunction
+   mapM_(uncurry(mkConnection), zip(abPipeVec, map(getRequestInterface, fxdotprods)));
 `endif
    MIMOConfiguration mimoCfg = defaultValue;
    MIMO#(K,N,TAdd#(K,N),Float) dfifo <- mkMIMO(mimoCfg);
