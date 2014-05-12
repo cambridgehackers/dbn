@@ -295,6 +295,8 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       return mkDotProdServer(fromInteger(i));
    endfunction
    Vector#(TMul#(J,K), DotProdServer#(N)) fxdotprods <- genWithM(mkFxDotProd);
+//`define LOCKSTEP
+`ifndef LOCKSTEP
    for (Integer k = 0; k < kk; k = k+1) begin
       for (Integer j = 0; j < jj; j = j + 1) begin
 	 rule connectDotProd;
@@ -308,6 +310,21 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 endrule
       end
    end
+`else
+   rule connectDotProd;
+      for (Integer k = 0; k < kk; k = k+1) begin
+	 for (Integer j = 0; j < jj; j = j + 1) begin
+	    let index = j*kk+k;
+	    let a <- toGet(aPipes[j][k]).get();
+	    let b <- toGet(bPipes[j][k]).get();
+	    int jint = fromInteger(j);
+	    int kint = fromInteger(k);
+	    //$display($format(fshow("connectDotProd pos=")+fshow(tuple2(jint,kint))+fshow(" a=")+fshow(pack(a))+fshow(" b=")+fshow(pack(b))));
+	    fxdotprods[index].request.put(tuple2(a, b));
+	 end
+      end
+   endrule
+`endif
    MIMOConfiguration mimoCfg = defaultValue;
    MIMO#(K,N,TAdd#(K,N),Float) dfifo <- mkMIMO(mimoCfg);
    Vector#(J, MIMO#(K,N,TAdd#(K,N),Float)) dfifos <- replicateM(mkMIMO(mimoCfg));
