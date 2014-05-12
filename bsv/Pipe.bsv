@@ -106,6 +106,37 @@ function PipeOut#(Tuple2#(a,b)) zipPipeOut(PipeOut#(a) ina, PipeOut#(b) inb);
 	      endinterface);
    endfunction
 
+module mkFunnel#(PipeOut#(Vector#(mk,a)) in)(PipeOut#(Vector#(m, a)))
+   provisos (Mul#(m, k, mk),
+	     Bits#(a, asz),
+	     Add#(a__, TMul#(asz, m), TMul#(asz, mk)),
+	     Add#(1, b__, asz),
+	     Add#(2, c__, mk),
+	     Add#(d__, m, mk),
+	     Add#(asz, m, e__),
+	     Add#(asz, mk, f__));
+   let m = fromInteger(valueOf(m));
+   let mk = fromInteger(valueOf(mk));
+
+   MIMOConfiguration cfg = defaultValue();
+   MIMO#(mk, m, mk, a) mimo <- mkMIMO(cfg);
+   rule consumer if (mimo.enqReadyN(mk));
+      Vector#(mk, a) v = in.first();
+      in.deq();
+      mimo.enq(mk, v);
+   endrule
+
+   method Vector#(m, a) first() if (mimo.deqReadyN(m));
+      return mimo.first();
+   endmethod
+   method Action deq() if (mimo.deqReadyN(m));
+      mimo.deq(m);
+   endmethod
+   method notEmpty();
+      return mimo.deqReadyN(m);
+   endmethod
+endmodule
+
 module mkUnfunnel#(PipeOut#(Vector#(m,a)) in)(PipeOut#(Vector#(mk, a)))
    provisos (Mul#(m, k, mk),
 	     Bits#(a, asz),
