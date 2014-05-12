@@ -287,8 +287,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorC <- mkReg(unpack(0));
    Reg#(UInt#(addrwidth)) dotprodCount <- mkReg(0);
 
-   Vector#(J, Vector#(K, PipeOut#(Vector#(N,Float)))) aPipes <- mapM(mkSizedForkVector(valueOf(SourceBufferSize)), map(vectorSourcePipe, sourceA));
+   Vector#(J, Vector#(K, PipeOut#(Vector#(N,Float)))) aPipes  <- mapM(mkSizedForkVector(valueOf(SourceBufferSize)), map(vectorSourcePipe, sourceA));
    Vector#(K, Vector#(J, PipeOut#(Vector#(N,Float)))) bPipesT <- mapM(mkForkVector, map(vectorSourcePipe, sourceB));
+   Vector#(J, Vector#(K, PipeOut#(Vector#(N,Float)))) bPipes  =  transpose(bPipesT);
 
    function Module#(DotProdServer#(N)) mkFxDotProd(Integer i);
       return mkDotProdServer(fromInteger(i));
@@ -299,7 +300,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 rule connectDotProd;
 	    let index = j*kk+k;
 	    let a <- toGet(aPipes[j][k]).get();
-	    let b <- toGet(bPipesT[k][j]).get();
+	    let b <- toGet(bPipes[j][k]).get();
 	    int jint = fromInteger(j);
 	    int kint = fromInteger(k);
 	    //$display($format(fshow("connectDotProd pos=")+fshow(tuple2(jint,kint))+fshow(" a=")+fshow(pack(a))+fshow(" b=")+fshow(pack(b))));
