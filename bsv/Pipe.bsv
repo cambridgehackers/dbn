@@ -98,6 +98,14 @@ instance Connectable#(PipeOut#(a),Put#(a));
    endmodule
 endinstance
 
+function PipeOut#(Tuple2#(a,b)) zipPipeOut(PipeOut#(a) ina, PipeOut#(b) inb);
+      return (interface PipeOut#(Tuple2#(a,b));
+		 method Tuple2#(a,b) first(); return tuple2(ina.first, inb.first); endmethod
+		 method Action deq(); ina.deq(); inb.deq(); endmethod
+		 method Bool notEmpty(); return ina.notEmpty() && inb.notEmpty(); endmethod
+	      endinterface);
+   endfunction
+
 module mkUnfunnel#(PipeOut#(Vector#(m,a)) in)(PipeOut#(Vector#(mk, a)))
    provisos (Mul#(m, k, mk),
 	     Bits#(a, asz),
