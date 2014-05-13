@@ -326,58 +326,63 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    end
 `else
    FirstLastPipe#(UInt#(addrwidth)) firstLastPipe <- mkFirstLastPipe();
-   Vector#(TAdd#(TMul#(J,K),1), PipeOut#(Tuple2#(Bool,Bool))) firstLastPipes      <- mkForkVector(firstLastPipe.pipe);
+   Vector#(2, PipeOut#(Tuple2#(Bool,Bool))) firstLastPipes      <- mkForkVector(firstLastPipe.pipe);
 
    Vector#(TMul#(J,K), FIFOF#(Float))   accumFifos  <- replicateM(mkFIFOF);
    Vector#(TMul#(J,K), PipeOut#(Float)) accumPipes  =  map(toPipeOut, accumFifos);
-   Vector#(M, PipeOut#(Float))          accumFunnels <- mkFunnelPipes(accumPipes);
+   PipeOut#(Vector#(TMul#(J,K), Float)) accumPipe   <- mkJoinVector(id, accumPipes);
+   PipeOut#(Vector#(M, Float))          accumFunnel <- mkFunnel(accumPipe);
 
    rule primeTheAccum;
-      match { .first, .last } <- toGet(firstLastPipes[valueOf(TMul#(J,K))]).get();
+      match { .first, .last } <- toGet(firstLastPipes[0]).get();
       if (first)
 	 for (Integer i = 0; i < valueOf(TMul#(J,K)); i = i + 1)
 	    accumFifos[i].enq(unpack(0));
    endrule
 
-   Vector#(TMul#(J,K), PipeOut#(Vector#(1,Float))) a1Pipes <- mapM(mkFunnel, flattenMatrix(aPipes));
-   Vector#(TMul#(J,K), PipeOut#(Vector#(1,Float))) b1Pipes <- mapM(mkFunnel, flattenMatrix(bPipes));
-   Vector#(TMul#(J,K), PipeOut#(Tuple2#(Vector#(1,Float),Vector#(1,Float)))) ab1Pipes = map(uncurry(zipPipeOut), zip(a1Pipes, b1Pipes));
+   Vector#(TMul#(J,K), PipeOut#(Vector#(1,Float))) aPipeVec <- mapM(mkFunnel, flattenMatrix(aPipes));
+   Vector#(TMul#(J,K), PipeOut#(Vector#(1,Float))) bPipeVec <- mapM(mkFunnel, flattenMatrix(bPipes));
+   Vector#(TMul#(J,K), PipeOut#(Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abPipeVec = map(uncurry(zipPipeOut), zip(aPipeVec, bPipeVec));
+   PipeOut#(Vector#(TMul#(J,K), Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abPipe <- mkJoinVector(id, abPipeVec);
 
-   Vector#(M, PipeOut#(Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abFunnels <- mkFunnelPipes(ab1Pipes);
+
+   PipeOut#(Vector#(M, Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abFunnel <- mkFunnel(abPipe);
    Vector#(M, FloatAlu#(FP_MUL_DEPTH)) muls <- replicateM(mkFloatMultiplier(defaultValue));
    Vector#(M, FloatAlu#(FP_ADD_DEPTH)) adders <- replicateM(mkFloatAdder(defaultValue));
-   for (Integer i = 0; i < valueOf(M); i = i + 1) begin
-      rule mulreq;
-	 match { .avec, .bvec } <- toGet(abFunnels[i]).get();
+   rule mulreq;
+      let vec <- toGet(abFunnel).get();
+      $display("%d mulreq", cycles);
+      for (Integer i = 0; i < valueOf(M); i = i + 1) begin
+	 match { .avec, .bvec } = vec[i];
 	 muls[i].request.put(tuple2(avec[0], bvec[0]));
-      endrule
-   end
-   for (Integer i = 0; i < valueOf(M); i = i + 1) begin
-      rule accumreq;
-	 let accum <- toGet(accumFunnels[i]).get();
+      end
+   endrule
+   rule accumreq;
+      $display("%d accumreq", cycles);
+      let accum <- toGet(accumFunnel).get();
+      for (Integer i = 0; i < valueOf(M); i = i + 1) begin
 	 match {.resp, .*} <- muls[i].response.get();
-	 adders[i].request.put(tuple2(resp, accum));
-      endrule
-   end
-   Vector#(M, FIFOF#(Float))   accumOutFifos      <- replicateM(mkFIFOF());
-   Vector#(M, PipeOut#(Float)) accumOutFunnelPipes =  map(toPipeOut, accumOutFifos);
-   for (Integer i = 0; i < valueOf(M); i = i + 1) begin
-      rule accumresp;
-	 match {.resp, .*} <- adders[i].response.get();
-	 accumOutFifos[i].enq(resp);
-      endrule
-   end
-   Vector#(TMul#(J,K), PipeOut#(Float)) accumOutPipes <- mkUnfunnelPipes(accumOutFunnelPipes);
-   Vector#(TMul#(J,K), FIFOF#(Float))     resultFifos <- replicateM(mkFIFOF());
-   for (Integer i = 0; i < valueOf(TMul#(J,K)); i = i + 1)
-      rule feedback;
-	 let accumOut <- toGet(accumOutPipes[i]).get();
-	 match { .first, .last } <- toGet(firstLastPipes[i]).get();
+	 adders[i].request.put(tuple2(resp, accum[i]));
+      end
+   endrule
+   FIFOF#(Vector#(M, Float))   accumOutFunnel     <- mkFIFOF();
+   PipeOut#(Vector#(M, Float)) accumOutFunnelPipe =  toPipeOut(accumOutFunnel);
+   rule accumresp;
+      function ActionValue#(Float) getAccumResponse(FloatAlu#(depth) adder); actionvalue match {.resp, .*} <- adder.response.get(); return resp; endactionvalue endfunction
+      Vector#(M,Float) accum <- mapM(getAccumResponse, adders);
+      accumOutFunnel.enq(accum);
+   endrule
+   PipeOut#(Vector#(TMul#(J,K), (Float))) accumOutPipe <- mkUnfunnel(accumOutFunnelPipe);
+   Vector#(TMul#(J,K), FIFOF#(Float)) resultFifos <- replicateM(mkFIFOF());
+   rule feedback;
+      let accumOut <- toGet(accumOutPipe).get();
+      match { .first, .last } <- toGet(firstLastPipes[1]).get();
+      for (Integer i = 0; i < valueOf(TMul#(J,K)); i = i + 1)
 	 if (last)
-	    resultFifos[i].enq(accumOut);
+	    resultFifos[i].enq(accumOut[i]);
 	 else
-	    accumFifos[i].enq(accumOut);
-      endrule
+	    accumFifos[i].enq(accumOut[i]);
+   endrule
    Vector#(TMul#(J,K), PipeOut#(Float)) fxpipes = map(toPipeOut, resultFifos);
 
 `endif
