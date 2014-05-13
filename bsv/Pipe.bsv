@@ -180,7 +180,7 @@ module mkFunnelPipes#(Vector#(mk, PipeOut#(a)) ins)(Vector#(m, PipeOut#(a)))
    for (Integer i = 0; i < m; i = i+1) begin
       Reg#(Bit#(asz)) which <- mkReg(0);
       rule consumer;
-	 let index = k*fromInteger(i) + which;
+	 let index = (which << valueOf(ksz)) + fromInteger(i);
 	 let v <- toGet(ins[index]).get();
 	 fifos[i].enq(v);
 	 which <= (which + 1) % k;
@@ -204,7 +204,7 @@ module mkUnfunnelPipes#(Vector#(m, PipeOut#(a)) ins)(Vector#(mk, PipeOut#(a)))
    for (Integer i = 0; i < m; i = i + 1) begin
       Reg#(Bit#(asz)) which <- mkReg(0);
       rule consumer;
-	 let index = k*fromInteger(i) + which;
+	 let index = (which << valueOf(ksz)) + fromInteger(i);
 	 let v <- toGet(ins[i]).get();
 	 fifos[index].enq(v);
 	 which <= (which + 1) % k;
