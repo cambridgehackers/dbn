@@ -339,25 +339,21 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	    accumFifos[i].enq(unpack(0));
    endrule
 
-   Vector#(TMul#(J,K), PipeOut#(Vector#(1,Float))) aPipeVec <- mapM(mkFunnel, flattenMatrix(aPipes));
-   Vector#(TMul#(J,K), PipeOut#(Vector#(1,Float))) bPipeVec <- mapM(mkFunnel, flattenMatrix(bPipes));
-   Vector#(TMul#(J,K), PipeOut#(Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abPipeVec = map(uncurry(zipPipeOut), zip(aPipeVec, bPipeVec));
-   PipeOut#(Vector#(TMul#(J,K), Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abPipe <- mkJoinVector(id, abPipeVec);
+   Vector#(TMul#(J,K), PipeOut#(Vector#(1,Float))) a1Pipes <- mapM(mkFunnel, flattenMatrix(aPipes));
+   Vector#(TMul#(J,K), PipeOut#(Vector#(1,Float))) b1Pipes <- mapM(mkFunnel, flattenMatrix(bPipes));
+   Vector#(TMul#(J,K), PipeOut#(Tuple2#(Vector#(1,Float),Vector#(1,Float)))) ab1Pipes = map(uncurry(zipPipeOut), zip(a1Pipes, b1Pipes));
 
 
-   PipeOut#(Vector#(M, Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abFunnel <- mkFunnel(abPipe);
+   Vector#(M, PipeOut#(Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abFunnels <- mkFunnelPipes(ab1Pipes);
    Vector#(M, FloatAlu#(FP_MUL_DEPTH)) muls <- replicateM(mkFloatMultiplier(defaultValue));
    Vector#(M, FloatAlu#(FP_ADD_DEPTH)) adders <- replicateM(mkFloatAdder(defaultValue));
    rule mulreq;
-      let vec <- toGet(abFunnel).get();
-      $display("%d mulreq", cycles);
       for (Integer i = 0; i < valueOf(M); i = i + 1) begin
-	 match { .avec, .bvec } = vec[i];
+	 match { .avec, .bvec } <- toGet(abFunnels[i]).get();
 	 muls[i].request.put(tuple2(avec[0], bvec[0]));
       end
    endrule
    rule accumreq;
-      $display("%d accumreq", cycles);
       for (Integer i = 0; i < valueOf(M); i = i + 1) begin
 	 let accum <- toGet(accumFunnels[i]).get();
 	 match {.resp, .*} <- muls[i].response.get();
