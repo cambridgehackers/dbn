@@ -296,3 +296,35 @@ instance ReducePipe#(n, a)
       return outpipe;
    endmodule
 endinstance
+
+interface FirstLastPipe#(type a);
+   interface PipeOut#(Tuple2#(Bool,Bool)) pipe;
+   method Action start(a count);
+endinterface
+
+module mkFirstLastPipe(FirstLastPipe#(a))
+   provisos (Bits#(a,asz), Ord#(a), Arith#(a), Eq#(a));
+   Reg#(a) countReg <- mkReg(0);
+   Reg#(Bool) firstReg <- mkReg(False);
+   Reg#(Bool) lastReg <- mkReg(False);
+   interface PipeOut pipe;
+      method Tuple2#(Bool, Bool) first();
+	 return tuple2(firstReg, lastReg);
+      endmethod
+      method Action deq() if (countReg > 0);
+	 firstReg <= False;
+	 let c = countReg - 1;
+	 if (c == 1)
+	    lastReg <= True;
+	 countReg <= c;
+      endmethod
+      method Bool notEmpty();
+	 return countReg > 0;
+      endmethod
+   endinterface
+   method Action start(a count) if (countReg == 0);
+      firstReg <= True;
+      lastReg <= False;
+      countReg <= count;
+   endmethod
+endmodule
