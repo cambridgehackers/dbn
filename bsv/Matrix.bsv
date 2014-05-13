@@ -346,19 +346,19 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    Vector#(M, PipeOut#(Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abFunnels <- mkFunnelPipes(ab1Pipes);
    Vector#(M, FloatAlu#(FP_MUL_DEPTH)) muls <- replicateM(mkFloatMultiplier(defaultValue));
    Vector#(M, FloatAlu#(FP_ADD_DEPTH)) adders <- replicateM(mkFloatAdder(defaultValue));
-   rule mulreq;
-      for (Integer i = 0; i < valueOf(M); i = i + 1) begin
+   for (Integer i = 0; i < valueOf(M); i = i + 1) begin
+      rule mulreq;
 	 match { .avec, .bvec } <- toGet(abFunnels[i]).get();
 	 muls[i].request.put(tuple2(avec[0], bvec[0]));
-      end
-   endrule
-   rule accumreq;
-      for (Integer i = 0; i < valueOf(M); i = i + 1) begin
+      endrule
+   end
+   for (Integer i = 0; i < valueOf(M); i = i + 1) begin
+      rule accumreq;
 	 let accum <- toGet(accumFunnels[i]).get();
 	 match {.resp, .*} <- muls[i].response.get();
 	 adders[i].request.put(tuple2(resp, accum));
-      end
-   endrule
+      endrule
+   end
    Vector#(M, FIFOF#(Float))   accumOutFifos      <- replicateM(mkFIFOF());
    Vector#(M, PipeOut#(Float)) accumOutFunnelPipes =  map(toPipeOut, accumOutFifos);
    for (Integer i = 0; i < valueOf(M); i = i + 1) begin
