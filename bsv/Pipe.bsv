@@ -167,6 +167,52 @@ module mkUnfunnel#(PipeOut#(Vector#(m,a)) in)(PipeOut#(Vector#(mk, a)))
    endmethod
 endmodule
 
+module mkFunnelPipes#(Vector#(mk, PipeOut#(a)) ins)(Vector#(m, PipeOut#(a)))
+   provisos (Mul#(m, k, mk),
+	     Bits#(a, asz),
+	     Log#(k,ksz)
+      );
+   let k = fromInteger(valueOf(k));
+   let m = fromInteger(valueOf(m));
+   let mk = fromInteger(valueOf(mk));
+
+   Vector#(m, FIFOF#(a)) fifos <- replicateM(mkFIFOF);
+   for (Integer i = 0; i < m; i = i+1) begin
+      Reg#(Bit#(asz)) which <- mkReg(0);
+      rule consumer;
+	 let index = k*fromInteger(i) + which;
+	 let v <- toGet(ins[index]).get();
+	 fifos[i].enq(v);
+	 which <= (which + 1) % k;
+      endrule
+   end
+
+   return map(toPipeOut, fifos);
+endmodule
+
+module mkUnfunnelPipes#(Vector#(m, PipeOut#(a)) ins)(Vector#(mk, PipeOut#(a)))
+   provisos (Mul#(m, k, mk),
+	     Log#(k,ksz),
+	     Bits#(a, asz),
+	     Add#(1, b__, asz)
+	     );
+   let m = fromInteger(valueOf(m));
+   let k = fromInteger(valueOf(k));
+   let mk = fromInteger(valueOf(mk));
+
+   Vector#(mk, FIFOF#(a)) fifos <- replicateM(mkFIFOF);
+   for (Integer i = 0; i < m; i = i + 1) begin
+      Reg#(Bit#(asz)) which <- mkReg(0);
+      rule consumer;
+	 let index = k*fromInteger(i) + which;
+	 let v <- toGet(ins[i]).get();
+	 fifos[index].enq(v);
+	 which <= (which + 1) % k;
+      endrule
+   end
+   return map(toPipeOut, fifos);
+endmodule
+
 module mkForkVector#(PipeOut#(a) inpipe)(Vector#(n, PipeOut#(a)))
    provisos (Bits#(a, asz));
    Vector#(n, FIFOF#(a)) fifos <- replicateM(mkFIFOF());
