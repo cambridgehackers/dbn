@@ -330,8 +330,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 
    Vector#(TMul#(J,K), FIFOF#(Float))   accumFifos  <- replicateM(mkFIFOF);
    Vector#(TMul#(J,K), PipeOut#(Float)) accumPipes  =  map(toPipeOut, accumFifos);
-   PipeOut#(Vector#(TMul#(J,K), Float)) accumPipe   <- mkJoinVector(id, accumPipes);
-   PipeOut#(Vector#(M, Float))          accumFunnel <- mkFunnel(accumPipe);
+   Vector#(M, PipeOut#(Float))          accumFunnels <- mkFunnelPipes(accumPipes);
 
    rule primeTheAccum;
       match { .first, .last } <- toGet(firstLastPipes[0]).get();
@@ -359,10 +358,10 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    endrule
    rule accumreq;
       $display("%d accumreq", cycles);
-      let accum <- toGet(accumFunnel).get();
       for (Integer i = 0; i < valueOf(M); i = i + 1) begin
+	 let accum <- toGet(accumFunnels[i]).get();
 	 match {.resp, .*} <- muls[i].response.get();
-	 adders[i].request.put(tuple2(resp, accum[i]));
+	 adders[i].request.put(tuple2(resp, accum));
       end
    endrule
    FIFOF#(Vector#(M, Float))   accumOutFunnel     <- mkFIFOF();
