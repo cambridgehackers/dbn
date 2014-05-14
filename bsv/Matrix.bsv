@@ -169,6 +169,142 @@ module [Module] mkDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(DotProdServer#(
    interface Reg numElts = numEltsReg;
 endmodule : mkDotProdServer
 
+interface SharedDotProdServer#(numeric type k, numeric type n);
+   interface Reg#(UInt#(20)) numElts;
+   interface Put#(Vector#(n,Float)) aInput;
+   interface Vector#(k, Put#(Vector#(n,Float))) bInput;
+   interface Vector#(k, PipeOut#(Float)) pipes;
+endinterface
+
+(* synthesize *)
+module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDotProdServer#(K,N));
+
+   let n = valueOf(N);
+   let add_depth = valueOf(FP_ADD_DEPTH);
+   let mul_depth = valueOf(FP_MUL_DEPTH);
+   Bool verbose = False; //label==0;
+
+   Reg#(Bit#(TAdd#(TLog#(FP_ADD_DEPTH),1))) initCnt <- mkReg(0);
+   FIFO#(void) initCtrl <- mkSizedFIFO(1);
+
+   Reg#(UInt#(20)) numEltsReg <- mkReg(0);
+   Reg#(UInt#(20)) countInReg <- mkReg(0);
+
+   FloatAlu#(FP_MUL_DEPTH) mul   <- mkFloatMultiplier(defaultValue);
+   FloatAlu#(FP_ADD_DEPTH) adder <- mkFloatAdder(defaultValue);
+   Vector#(K,FloatAlu#(FP_MUL_DEPTH)) muls   <- replicateM(mkFloatMultiplier(defaultValue));
+   Vector#(K,FloatAlu#(FP_ADD_DEPTH)) adders <- replicateM(mkFloatAdder(defaultValue));
+
+   // This could be done in fewer steps
+   FIFOF#(Vector#(N,Float)) afifo <- mkFIFOF();
+   Vector#(K, PipeOut#(Vector#(N,Float))) aPipesN <- mkForkVector(toPipeOut(afifo));
+   Vector#(K, PipeOut#(Vector#(1,Float))) aPipes  = aPipesN; //<- mapM(mkFunnel, aPipesN);
+   PipeOut#(Vector#(K,Float))             aPipe   <- mkJoinVector(id, map(unvectorPipeOut, aPipes));
+   PipeOut#(Vector#(1,Float))             aFunnelV <- mkFunnel(aPipe);
+   PipeOut#(Float)                        aFunnel = unvectorPipeOut(aFunnelV);
+
+   Vector#(K, FIFOF#(Vector#(N,Float)))   bfifos <- replicateM(mkFIFOF());
+   Vector#(K, PipeOut#(Vector#(N,Float))) bPipesN = map(toPipeOut,bfifos);
+   Vector#(K, PipeOut#(Vector#(1,Float))) bPipes = bPipesN; //<- mapM(mkFunnel, bPipesN);
+   PipeOut#(Vector#(K,Float))             bPipe  <- mkJoinVector(id, map(unvectorPipeOut, bPipes));
+   PipeOut#(Vector#(1,Float))             bFunnelV <- mkFunnel(bPipe);
+   PipeOut#(Float)                        bFunnel = unvectorPipeOut(bFunnelV);
+
+   Vector#(K,FIFOF#(Bool)) firstFifos <- replicateM(mkSizedFIFOF(valueOf(K)));
+   Vector#(K,FIFOF#(Bool)) lastFifos <- replicateM(mkSizedFIFOF(valueOf(K)));
+
+   Vector#(N, Reg#(Bit#(TAdd#(TLog#(FP_ADD_DEPTH),1)))) drainCnts <- replicateM(mkReg(0));
+   Vector#(N, Reg#(Bool)) drained <- replicateM(mkReg(False));
+
+   Vector#(K, FIFOF#(Float))  accumFifos <- replicateM(mkFIFOF);
+   Vector#(K,FIFOF#(Float)) dotfifos <- replicateM(mkFIFOF);
+
+   Reg#(Bit#(TLog#(K))) chanReg <- mkReg(0);
+   Vector#(2,FIFO#(Bit#(TLog#(K)))) chanFifos <- replicateM(mkSizedFIFO(valueOf(K)));
+
+   function Bit#(TLog#(N)) i_v(Integer i) = fromInteger(i);
+
+   Reg#(Bit#(32)) cycles <- mkReg(0);
+   rule countCycles;
+      cycles <= cycles + 1;
+   endrule
+
+   Vector#(K, Reg#(Bit#(32))) lastMulin <- replicateM(mkReg(0));
+   Vector#(12, Reg#(Bool))   latencyReported <- replicateM(mkReg(False));
+
+   (* descending_urgency = "mulin,accout" *)
+   rule mulin;
+      let chan = chanReg;
+      begin
+	 //$display("%08d label=%d mulin chan=%d chanReg=%d", cycles, label, chan, chanReg);
+	 let latency = cycles-lastMulin[chan];
+	 if ((lastMulin[chan] - cycles) < 6)
+	    $display("%08d label=%d mulin chan=%d latency", cycles, label, chan, latency);
+	 if (latency > 11) latency = 11;
+	 if (!latencyReported[latency]) begin
+	    $display("%08d label=%d mulin chan=%d latency", cycles, label, chan, latency);
+	    latencyReported[latency] <= True;
+	 end
+	 lastMulin[chan] <= cycles;
+      end
+
+      for (Integer i = 0; i < 2; i=i+1)
+	 chanFifos[i].enq(chan);
+      chanReg <= (chan + 1);
+      let a <- toGet(aFunnel).get();
+      let b <- toGet(bFunnel).get();
+      let first <- toGet(firstFifos[chan]).get();
+      if (first)
+	 accumFifos[chan].enq(unpack(0));
+      //mul.request.put(tuple2(a, b));
+      muls[chan].request.put(tuple2(a, b));
+   endrule
+
+   rule mulout;
+      let chan <- toGet(chanFifos[0]).get();
+      //$display("label=%d mulout chan=%d chanReg=%d", label, chan, chanReg);
+      match {.resp,.*} <- muls[chan].response.get();
+      let acc <- toGet(accumFifos[chan]).get();
+      //adder.request.put(tuple2(resp,acc));
+      adders[chan].request.put(tuple2(resp,acc));
+   endrule
+
+   rule accout;
+      let chan <- toGet(chanFifos[1]).get();
+      //$display("label=%d accout chan=%d chanReg=%d", label, chan, chanReg);
+      let last <- toGet(lastFifos[chan]).get;
+      match {.acc,.*} <- adders[chan].response.get();
+      if (last)
+	 dotfifos[chan].enq(acc);
+      else
+	 accumFifos[chan].enq(acc);
+   endrule
+
+   Vector#(K,PipeOut#(Float)) dotpipes = map(toPipeOut, dotfifos);
+
+   interface Put aInput;
+      method Action put(Vector#(N,Float) avec);
+
+   	 afifo.enq(avec);
+
+	 let c = countInReg+fromInteger(n);
+	 Bool isFirst = (countInReg == 0);
+	 Bool isLast = (c >= numEltsReg);
+	 if (isLast) begin
+	    c = 0;
+	 end
+	 countInReg <= c;
+	 for (Integer k = 0; k < valueOf(K); k = k + 1) begin
+	    lastFifos[k].enq(isLast);
+	    firstFifos[k].enq(isFirst);
+	 end
+      endmethod
+   endinterface
+   interface Vector bInput = map(toPut, bfifos);
+   interface Vector pipes = dotpipes;
+   interface Reg numElts = numEltsReg;
+endmodule : mkSharedDotProdServer
+
 function Vector#(TMul#(j,k), etype) flattenMatrix(Vector#(j, Vector#(k, etype)) mat);
    function etype flatten(Integer i); return mat[i/valueOf(k)][i%valueOf(k)]; endfunction
    return genWith(flatten);
@@ -293,99 +429,31 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorC <- mkReg(unpack(0));
    Reg#(UInt#(addrwidth)) dotprodCount <- mkReg(0);
 
-   Vector#(J, Vector#(K, PipeOut#(Vector#(N,Float)))) aPipes  <- mapM(mkSizedForkVector(valueOf(SourceBufferSize)), map(vectorSourcePipe, sourceA));
-   Vector#(K, Vector#(J, PipeOut#(Vector#(N,Float)))) bPipesT <- mapM(mkForkVector, map(vectorSourcePipe, sourceB));
-   Vector#(J, Vector#(K, PipeOut#(Vector#(N,Float)))) bPipes  =  transpose(bPipesT);
+   Vector#(J, PipeOut#(Vector#(N,Float))) aPipes  = map(vectorSourcePipe, sourceA);
+   Vector#(K, Vector#(J, PipeOut#(Vector#(N,Float)))) bPipes  <- mapM(mkForkVector, map(vectorSourcePipe, sourceB));
 
    rule countCycles;
       cycles <= cycles+1;
    endrule
 
-//`define OLDWAY
-`ifdef OLDWAY
-   function Module#(DotProdServer#(N)) mkFxDotProd(Integer i);
-      return mkDotProdServer(fromInteger(i));
+   function Module#(SharedDotProdServer#(K,N)) mkFxDotProd(Integer i);
+      return mkSharedDotProdServer(fromInteger(i));
    endfunction
-   function Put#(Tuple2#(Vector#(n,Float),Vector#(n,Float))) getDotProdServerRequestInterface(DotProdServer#(n) s); return s.request; endfunction
-   function PipeOut#(Float) getDotProdServerPipe(DotProdServer#(n) s); return s.pipe; endfunction
-   Vector#(TMul#(J,K), DotProdServer#(N)) fxdotprods <- genWithM(mkFxDotProd);
-   Vector#(TMul#(J,K), PipeOut#(Float)) fxpipes = map(getDotProdServerPipe, fxdotprods);
+   function Vector#(k,PipeOut#(Float)) getDotProdServerPipes(SharedDotProdServer#(k,n) s); return s.pipes; endfunction
+   Vector#(J, SharedDotProdServer#(K,N)) fxdotprods <- genWithM(mkFxDotProd);
+   Vector#(J, Vector#(K, PipeOut#(Float))) fxpipes = map(getDotProdServerPipes, fxdotprods);
 
-   for (Integer k = 0; k < kk; k = k+1) begin
-      for (Integer j = 0; j < jj; j = j + 1) begin
-	 rule connectDotProd;
-	    let index = j*kk+k;
-	    let a <- toGet(aPipes[j][k]).get();
-	    let b <- toGet(bPipes[j][k]).get();
-	    int jint = fromInteger(j);
-	    int kint = fromInteger(k);
-	    //$display($format(fshow("connectDotProd pos=")+fshow(tuple2(jint,kint))+fshow(" a=")+fshow(pack(a))+fshow(" b=")+fshow(pack(b))));
-	    fxdotprods[index].request.put(tuple2(a, b));
-	 endrule
-      end
-   end
-`else
    FirstLastPipe#(UInt#(addrwidth)) firstLastPipe <- mkFirstLastPipe();
    Vector#(2, PipeOut#(Tuple2#(Bool,Bool))) firstLastPipes      <- mkForkVector(firstLastPipe.pipe);
 
-   Vector#(TMul#(J,K), FIFOF#(Float))   accumFifos  <- replicateM(mkFIFOF);
-   Vector#(TMul#(J,K), PipeOut#(Float)) accumPipes  =  map(toPipeOut, accumFifos);
-   PipeOut#(Vector#(TMul#(J,K), Float)) accumPipe   <- mkJoinVector(id, accumPipes);
-   PipeOut#(Vector#(M, Float))          accumFunnel <- mkFunnel(accumPipe);
-
-   rule primeTheAccum;
-      match { .first, .last } <- toGet(firstLastPipes[0]).get();
-      if (first)
-	 for (Integer i = 0; i < valueOf(TMul#(J,K)); i = i + 1)
-	    accumFifos[i].enq(unpack(0));
-   endrule
-
-   Vector#(TMul#(J,K), PipeOut#(Vector#(1,Float))) aPipeVec <- mapM(mkFunnel, flattenMatrix(aPipes));
-   Vector#(TMul#(J,K), PipeOut#(Vector#(1,Float))) bPipeVec <- mapM(mkFunnel, flattenMatrix(bPipes));
-   Vector#(TMul#(J,K), PipeOut#(Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abPipeVec = map(uncurry(zipPipeOut), zip(aPipeVec, bPipeVec));
-   PipeOut#(Vector#(TMul#(J,K), Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abPipe <- mkJoinVector(id, abPipeVec);
-
-
-   PipeOut#(Vector#(M, Tuple2#(Vector#(1,Float),Vector#(1,Float)))) abFunnel <- mkFunnel(abPipe);
-   Vector#(M, FloatAlu#(FP_MUL_DEPTH)) muls <- replicateM(mkFloatMultiplier(defaultValue));
-   Vector#(M, FloatAlu#(FP_ADD_DEPTH)) adders <- replicateM(mkFloatAdder(defaultValue));
-   rule mulreq;
-      let vec <- toGet(abFunnel).get();
-      $display("%d mulreq", cycles);
-      for (Integer i = 0; i < valueOf(M); i = i + 1) begin
-	 match { .avec, .bvec } = vec[i];
-	 muls[i].request.put(tuple2(avec[0], bvec[0]));
+   for (Integer j = 0; j < jj; j = j + 1)
+      mkConnection(toGet(aPipes[j]), fxdotprods[j].aInput);
+   for (Integer k = 0; k < kk; k = k+1) begin
+      for (Integer j = 0; j < jj; j = j + 1) begin
+	 mkConnection(toGet(bPipes[k][j]), fxdotprods[j].bInput[k]);
       end
-   endrule
-   rule accumreq;
-      $display("%d accumreq", cycles);
-      let accum <- toGet(accumFunnel).get();
-      for (Integer i = 0; i < valueOf(M); i = i + 1) begin
-	 match {.resp, .*} <- muls[i].response.get();
-	 adders[i].request.put(tuple2(resp, accum[i]));
-      end
-   endrule
-   FIFOF#(Vector#(M, Float))   accumOutFunnel     <- mkFIFOF();
-   PipeOut#(Vector#(M, Float)) accumOutFunnelPipe =  toPipeOut(accumOutFunnel);
-   rule accumresp;
-      function ActionValue#(Float) getAccumResponse(FloatAlu#(depth) adder); actionvalue match {.resp, .*} <- adder.response.get(); return resp; endactionvalue endfunction
-      Vector#(M,Float) accum <- mapM(getAccumResponse, adders);
-      accumOutFunnel.enq(accum);
-   endrule
-   PipeOut#(Vector#(TMul#(J,K), (Float))) accumOutPipe <- mkUnfunnel(accumOutFunnelPipe);
-   Vector#(TMul#(J,K), FIFOF#(Float)) resultFifos <- replicateM(mkFIFOF());
-   rule feedback;
-      let accumOut <- toGet(accumOutPipe).get();
-      match { .first, .last } <- toGet(firstLastPipes[1]).get();
-      for (Integer i = 0; i < valueOf(TMul#(J,K)); i = i + 1)
-	 if (last)
-	    resultFifos[i].enq(accumOut[i]);
-	 else
-	    accumFifos[i].enq(accumOut[i]);
-   endrule
-   Vector#(TMul#(J,K), PipeOut#(Float)) fxpipes = map(toPipeOut, resultFifos);
+   end
 
-`endif
    MIMOConfiguration mimoCfg = defaultValue;
    MIMO#(K,N,TAdd#(K,N),Float) dfifo <- mkMIMO(mimoCfg);
    Vector#(J, MIMO#(K,N,TAdd#(K,N),Float)) dfifos <- replicateM(mkMIMO(mimoCfg));
@@ -459,9 +527,6 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 sinks[j].vector.start(descriptorC.pointer, pack(extend(startC>>nshift)), fromInteger(kk/n));
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("      sinks[")+fshow(jint)+fshow("].start")+fshow(startC)));
 
-	 // this one counts by one rather than 1/n because the source values are unfunneled before mul/add
-	 if (j == 0)
-	    firstLastPipe.start(truncate(descriptorA.numColumns));
       endrule
 
       rule finishSourceA;
@@ -474,7 +539,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 Vector#(K,Float) vs;
 	 for (Integer k = 0; k < kk; k = k + 1) begin
 	    let dpnum = j*kk+k;
-	    let v <- toGet(fxpipes[dpnum]).get();
+	    let v <- toGet(fxpipes[j][k]).get();
 	    //let indexi = tuple2(tpl_1(index), tpl_2(index)+fromInteger(k));
 	    //if (verbose) $display($format(fshow(cycles)+fshow("    dotprodvalue index=")+fshow(indexi)+fshow(" dotprod=")+fshow(v)));
 	    int jint = fromInteger(j);
@@ -527,14 +592,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       for (Integer j = 0; j < jj; j = j + 1) begin
 	 startAOffset[j] <= fromInteger(j)*numColumnsA;
 	 startCOffset[j] <= fromInteger(j)*numRowsB;
+	 fxdotprods[j].numElts <= truncate(numColumnsA);
       end
       for (Integer k = 0; k < kk; k = k + 1) begin
-	 for (Integer j = 0; j < jj; j = j + 1) begin
-	    let index = j*kk + k;
-`ifdef OLDWAY
-	    fxdotprods[index].numElts <= truncate(numColumnsA);
-`endif
-	 end
 	 startBOffset[k] <= fromInteger(k)*numColumnsB;
       end
    endmethod
