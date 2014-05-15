@@ -208,7 +208,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    Vector#(K,FIFOF#(Float)) dotfifos   <- replicateM(mkFIFOF1);
 
    Reg#(Bit#(TLog#(K))) chanReg <- mkReg(0);
-   Vector#(2,FIFO#(Bit#(TLog#(K)))) chanFifos <- replicateM(mkSizedFIFO(valueOf(K)*2));
+   Vector#(2,FIFO#(Bit#(TLog#(K)))) chanFifos <- replicateM(mkSizedFIFO(valueOf(K)));
 
    function Bit#(TLog#(N)) i_v(Integer i) = fromInteger(i);
 
