@@ -21,17 +21,17 @@
 // SOFTWARE.
 
 `ifndef N_VALUE
-typedef 1 N;
+typedef 2 N;
 `else
 typedef `N_VALUE N;
 `endif
 `ifndef J_VALUE
-typedef 4 J;
+typedef 8 J;
 `else
 typedef `J_VALUE J;
 `endif
 `ifndef K_VALUE
-typedef 4 K;
+typedef 8 K;
 `else
 typedef `K_VALUE K;
 `endif
