@@ -184,16 +184,12 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    let mul_depth = valueOf(FP_MUL_DEPTH);
    Bool verbose = False; //label==0;
 
-   Reg#(Bit#(TAdd#(TLog#(FP_ADD_DEPTH),1))) initCnt <- mkReg(0);
-   FIFO#(void) initCtrl <- mkSizedFIFO(1);
-
-   Reg#(UInt#(20)) numEltsReg <- mkReg(0);
-   Reg#(UInt#(20)) countInReg <- mkReg(0);
+   Reg#(UInt#(20)) numEltsReg   <- mkReg(0);
+   Reg#(UInt#(20)) lastCountReg <- mkReg(0);
+   Reg#(UInt#(20)) countReg     <- mkReg(0);
 
    FloatAlu#(FP_MUL_DEPTH) mul   <- mkFloatMultiplier(defaultValue);
    FloatAlu#(FP_ADD_DEPTH) adder <- mkFloatAdder(defaultValue);
-   Vector#(K,FloatAlu#(FP_MUL_DEPTH)) muls   <- replicateM(mkFloatMultiplier(defaultValue));
-   Vector#(K,FloatAlu#(FP_ADD_DEPTH)) adders <- replicateM(mkFloatAdder(defaultValue));
 
    // This could be done in fewer steps
    FIFOF#(Vector#(N,Float)) afifo <- mkFIFOF();
@@ -210,8 +206,14 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    PipeOut#(Vector#(1,Float))             bFunnelV <- mkFunnel(bPipe);
    PipeOut#(Float)                        bFunnel = unvectorPipeOut(bFunnelV);
 
-   Vector#(K,FIFOF#(Bool)) firstFifos <- replicateM(mkSizedFIFOF(valueOf(K)));
-   Vector#(K,FIFOF#(Bool)) lastFifos <- replicateM(mkSizedFIFOF(valueOf(K)));
+   Vector#(K,FIFOF#(Vector#(N,Bool))) firstFifos <- replicateM(mkSizedFIFOF(valueOf(K)));
+   Vector#(K,FIFOF#(Vector#(N,Bool))) lastFifos <- replicateM(mkSizedFIFOF(valueOf(K)));
+   Vector#(K,PipeOut#(Vector#(N,Bool))) firstPipesN = map(toPipeOut, firstFifos);
+   Vector#(K,PipeOut#(Vector#(N,Bool))) lastPipesN = map(toPipeOut, lastFifos);
+   Vector#(K,PipeOut#(Vector#(1,Bool))) firstPipes1 = firstPipesN; //<- mapM(mkFunnel, firstPipesN);
+   Vector#(K,PipeOut#(Bool))            firstPipes = map(unvectorPipeOut, firstPipes1);
+   Vector#(K,PipeOut#(Vector#(1,Bool))) lastPipes1 = lastPipesN; //<- mapM(mkFunnel, lastPipesN);
+   Vector#(K,PipeOut#(Bool))            lastPipes = map(unvectorPipeOut, lastPipes1);
 
    Vector#(N, Reg#(Bit#(TAdd#(TLog#(FP_ADD_DEPTH),1)))) drainCnts <- replicateM(mkReg(0));
    Vector#(N, Reg#(Bool)) drained <- replicateM(mkReg(False));
@@ -235,8 +237,8 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    (* descending_urgency = "mulin,accout" *)
    rule mulin;
       let chan = chanReg;
-      begin
-	 //$display("%08d label=%d mulin chan=%d chanReg=%d", cycles, label, chan, chanReg);
+
+      begin // measure and display latency
 	 let latency = cycles-lastMulin[chan];
 	 if ((lastMulin[chan] - cycles) < 6)
 	    $display("%08d label=%d mulin chan=%d latency", cycles, label, chan, latency);
@@ -253,27 +255,28 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
       chanReg <= (chan + 1);
       let a <- toGet(aFunnel).get();
       let b <- toGet(bFunnel).get();
-      let first <- toGet(firstFifos[chan]).get();
+
+      let first <- toGet(firstPipes[chan]).get();
       if (first)
 	 accumFifos[chan].enq(unpack(0));
-      //mul.request.put(tuple2(a, b));
-      muls[chan].request.put(tuple2(a, b));
+      //if (label == 0) $display("%08d label=%d mulin chan=%d first=%d", cycles, label, chan, first);
+      mul.request.put(tuple2(a, b));
    endrule
 
    rule mulout;
       let chan <- toGet(chanFifos[0]).get();
-      //$display("label=%d mulout chan=%d chanReg=%d", label, chan, chanReg);
-      match {.resp,.*} <- muls[chan].response.get();
+      //if (label == 0) $display("%08d label=%d mulout chan=%d", cycles, label, chan);
+      match {.resp,.*} <- mul.response.get();
       let acc <- toGet(accumFifos[chan]).get();
       //adder.request.put(tuple2(resp,acc));
-      adders[chan].request.put(tuple2(resp,acc));
+      adder.request.put(tuple2(resp,acc));
    endrule
 
    rule accout;
       let chan <- toGet(chanFifos[1]).get();
-      //$display("label=%d accout chan=%d chanReg=%d", label, chan, chanReg);
-      let last <- toGet(lastFifos[chan]).get;
-      match {.acc,.*} <- adders[chan].response.get();
+      //if (label == 0) $display("%08d label=%d accout chan=%d", cycles, label, chan);
+      let last <- toGet(lastPipes[chan]).get;
+      match {.acc,.*} <- adder.response.get();
       if (last)
 	 dotfifos[chan].enq(acc);
       else
@@ -287,22 +290,34 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
 
    	 afifo.enq(avec);
 
-	 let c = countInReg+fromInteger(n);
-	 Bool isFirst = (countInReg == 0);
-	 Bool isLast = (c >= numEltsReg);
+	 let c = countReg+fromInteger(valueOf(N));
+	 Bool isFirst = (countReg == 0);
+	 Bool isLast = (countReg == lastCountReg);
 	 if (isLast) begin
 	    c = 0;
 	 end
-	 countInReg <= c;
+	 countReg <= c;
+
+	 Vector#(N,Bool) lastvec = replicate(False);
+	 lastvec[valueOf(N)-1] = isLast;
+	 Vector#(N,Bool) firstvec = replicate(False);
+	 firstvec[0] = isFirst;
 	 for (Integer k = 0; k < valueOf(K); k = k + 1) begin
-	    lastFifos[k].enq(isLast);
-	    firstFifos[k].enq(isFirst);
+	    lastFifos[k].enq(lastvec);
+	    firstFifos[k].enq(firstvec);
 	 end
+
       endmethod
    endinterface
    interface Vector bInput = map(toPut, bfifos);
    interface Vector pipes = dotpipes;
-   interface Reg numElts = numEltsReg;
+   interface Reg numElts;
+      method Action _write(UInt#(20) v);
+	 numEltsReg <= v;
+	 lastCountReg <= v-1;
+      endmethod
+      method _read = numEltsReg._read;
+   endinterface
 endmodule : mkSharedDotProdServer
 
 function Vector#(TMul#(j,k), etype) flattenMatrix(Vector#(j, Vector#(k, etype)) mat);

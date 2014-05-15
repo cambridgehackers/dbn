@@ -26,19 +26,22 @@ typedef 1 N;
 typedef `N_VALUE N;
 `endif
 `ifndef J_VALUE
-typedef 1 J;
+typedef 4 J;
 `else
 typedef `J_VALUE J;
 `endif
 `ifndef K_VALUE
-typedef 1 K;
+typedef 4 K;
 `else
 typedef `K_VALUE K;
 `endif
 
+typedef TMul#(J,K) JK;
+typedef TMul#(JK,N) JNK;
+
 typedef 15 BurstLen;
 
-typedef 8 SourceBufferSize;
+typedef 4 SourceBufferSize;
 
 typedef TMul#(32,N) DmaSz;
 
