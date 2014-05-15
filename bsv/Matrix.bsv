@@ -172,7 +172,7 @@ endmodule : mkDotProdServer
 interface SharedDotProdServer#(numeric type k);
    interface Reg#(UInt#(20)) numElts;
    interface Put#(Float)                 aInput;
-   interface Vector#(k, Put#(Float))     bInput;
+   interface Put#(Float)                 bInput;
    interface Vector#(k, PipeOut#(Float)) pipes;
 endinterface
 
@@ -192,12 +192,11 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    FloatAlu#(FP_MUL_DEPTH) mul   <- mkFloatMultiplier(defaultValue);
    FloatAlu#(FP_ADD_DEPTH) adder <- mkFloatAdder(defaultValue);
 
-   FIFOF#(Float)                          afifo   <- mkFIFOF1();
+   FIFOF#(Float)                          afifo   <- mkFIFOF();
    PipeOut#(Float)                        aFunnel <- mkRepeat(repetitions, toPipeOut(afifo));
 
-   Vector#(K, FIFOF#(Float))              bfifos <- replicateM(mkFIFOF1());
-   Vector#(K, PipeOut#(Float))            bPipes = map(toPipeOut,bfifos);
-   PipeOut#(Float)                        bFunnel <- mkFunnelPipes1(bPipes);
+   FIFOF#(Float)                          bfifo <- mkFIFOF();
+   PipeOut#(Float)                        bFunnel = toPipeOut(bfifo);
 
    FIFOF#(Bool) firstFifo <- mkSizedFIFOF(valueOf(K));
    FIFOF#(Bool) lastFifo  <- mkSizedFIFOF(valueOf(K));
@@ -294,7 +293,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
 
       endmethod
    endinterface
-   interface Vector bInput = map(toPut, bfifos);
+   interface Put bInput   = toPut(bfifo);
    interface Vector pipes = dotpipes;
    interface Reg numElts;
       method Action _write(UInt#(20) v);
@@ -430,8 +429,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    Reg#(UInt#(addrwidth)) dotprodCount <- mkReg(0);
 
    Vector#(J, PipeOut#(Float))             aPipes     <- mapM(mkFunnel1, map(vectorSourcePipe, sourceA));
-   Vector#(K, PipeOut#(Float))             bPipesOrig <- mapM(mkFunnel1, map(vectorSourcePipe, sourceB));
-   Vector#(K, Vector#(J, PipeOut#(Float))) bPipes     <- mapM(mkForkVector, bPipesOrig);
+   Vector#(K, PipeOut#(Float))             bPipesK    <- mapM(mkFunnel1, map(vectorSourcePipe, sourceB));
+   PipeOut#(Float)                         bFunnel    <- mkFunnelPipes1(bPipesK);
+   Vector#(J, PipeOut#(Float))             bPipes     <- mkForkVector(bFunnel);
 
    rule countCycles;
       cycles <= cycles+1;
@@ -447,12 +447,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    FirstLastPipe#(UInt#(addrwidth)) firstLastPipe          <- mkFirstLastPipe();
    Vector#(2, PipeOut#(Tuple2#(Bool,Bool))) firstLastPipes <- mkForkVector(firstLastPipe.pipe);
 
-   for (Integer j = 0; j < jj; j = j + 1)
+   for (Integer j = 0; j < jj; j = j + 1) begin
       mkConnection(toGet(aPipes[j]), fxdotprods[j].aInput);
-   for (Integer k = 0; k < kk; k = k+1) begin
-      for (Integer j = 0; j < jj; j = j + 1) begin
-	 mkConnection(toGet(bPipes[k][j]), fxdotprods[j].bInput[k]);
-      end
+      mkConnection(toGet(bPipes[j]), fxdotprods[j].bInput);
    end
 
    MIMOConfiguration mimoCfg = defaultValue;
