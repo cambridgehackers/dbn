@@ -44,7 +44,7 @@ interface DotProdServer#(numeric type n);
    interface PipeOut#(Float) pipe;
 endinterface
 
-(* synthesize *)
+//(* synthesize *)
 module [Module] mkDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(DotProdServer#(N));
 
    let n = valueOf(N);
@@ -192,10 +192,10 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    FloatAlu#(FP_MUL_DEPTH) mul   <- mkFloatMultiplier(defaultValue);
    FloatAlu#(FP_ADD_DEPTH) adder <- mkFloatAdder(defaultValue);
 
-   FIFOF#(Float)                          afifo   <- mkFIFOF();
+   FIFOF#(Float)                          afifo   <- mkFIFOF1();
    PipeOut#(Float)                        aFunnel <- mkRepeat(repetitions, toPipeOut(afifo));
 
-   Vector#(K, FIFOF#(Float))              bfifos <- replicateM(mkFIFOF());
+   Vector#(K, FIFOF#(Float))              bfifos <- replicateM(mkFIFOF1());
    Vector#(K, PipeOut#(Float))            bPipes = map(toPipeOut,bfifos);
    PipeOut#(Float)                        bFunnel <- mkFunnelPipes1(bPipes);
 
@@ -204,11 +204,11 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    PipeOut#(Bool) firstPipe <- mkRepeat(repetitions, toPipeOut(firstFifo));
    PipeOut#(Bool) lastPipe <- mkRepeat(repetitions,  toPipeOut(lastFifo));
 
-   Vector#(K,FIFOF#(Float))  accumFifos <- replicateM(mkFIFOF);
-   Vector#(K,FIFOF#(Float)) dotfifos <- replicateM(mkFIFOF);
+   Vector#(K,FIFOF#(Float)) accumFifos <- replicateM(mkFIFOF1);
+   Vector#(K,FIFOF#(Float)) dotfifos   <- replicateM(mkFIFOF1);
 
    Reg#(Bit#(TLog#(K))) chanReg <- mkReg(0);
-   Vector#(2,FIFO#(Bit#(TLog#(K)))) chanFifos <- replicateM(mkSizedFIFO(valueOf(K)));
+   Vector#(2,FIFO#(Bit#(TLog#(K)))) chanFifos <- replicateM(mkSizedFIFO(valueOf(K)*2));
 
    function Bit#(TLog#(N)) i_v(Integer i) = fromInteger(i);
 
@@ -220,7 +220,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    Vector#(K, Reg#(Bit#(32))) lastMulin <- replicateM(mkReg(0));
    Vector#(12, Reg#(Bool))   latencyReported <- replicateM(mkReg(False));
 
-   (* descending_urgency = "mulin,accout" *)
+//   (* descending_urgency = "mulin,accout" *)
    rule mulin;
       let chan = chanReg;
 
@@ -236,8 +236,8 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
 	 lastMulin[chan] <= cycles;
       end
 
-      for (Integer i = 0; i < 2; i=i+1)
-	 chanFifos[i].enq(chan);
+      chanFifos[0].enq(chan);
+      chanFifos[1].enq(chan);
       chanReg <= (chan + 1);
       let a <- toGet(aFunnel).get();
       let b <- toGet(bFunnel).get();
@@ -593,10 +593,14 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       for (Integer k = 0; k < kk; k = k + 1) begin
 	 startBOffset[k] <= fromInteger(k)*numColumnsB;
       end
+
+      $dumpfile("test.vcd");
+      $dumpvars();
    endmethod
    method ActionValue#(Bool) finish();
       if (verbose) $display("mm.finish()");
       doneFifo.deq();
+      $dumpoff();
       return True;
    endmethod
 
