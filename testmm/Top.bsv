@@ -29,7 +29,11 @@ import TimerRequestWrapper::*;
 import Matrix::*;
 
 //typedef TAdd#(K,J) NumMasters;
-typedef 1 NumMasters;
+//typedef 1 NumMasters;
+typedef 4 NumMasters;
+
+typedef TMul#(TDiv#(TAdd#(K,J),NumMasters),NumMasters)  NumReadBuffers;
+typedef TMul#(TDiv#(J,NumMasters),NumMasters)  NumWriteBuffers;
 
 module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    provisos (Add#(a__, addrWidth, 40),
@@ -49,11 +53,11 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    MmRequestWrapper mmRequestWrapper <- mkMmRequestWrapper(MmRequestPortal,mm.mmRequest);
    TimerRequestWrapper timerRequestWrapper <- mkTimerRequestWrapper(TimerRequestPortal,mm.timerRequest);
    
-   Vector#(TAdd#(K,J), DmaReadBuffer#(TMul#(32,N),BurstLen)) read_buffers <- replicateM(mkDmaReadBuffer);
+   Vector#(NumReadBuffers, DmaReadBuffer#(TMul#(32,N),BurstLen)) read_buffers <- replicateM(mkDmaReadBuffer);
    zipWithM(mkConnection, mm.readClients, map(ors, read_buffers));
    let readClients = map(orc, read_buffers);
 
-   Vector#(J, DmaWriteBuffer#(TMul#(32,N),BurstLen)) write_buffers <- replicateM(mkDmaWriteBuffer);
+   Vector#(NumWriteBuffers, DmaWriteBuffer#(TMul#(32,N),BurstLen)) write_buffers <- replicateM(mkDmaWriteBuffer);
    zipWithM(mkConnection, mm.writeClients, map(ows,takeAt(0,write_buffers)));
    let writeClients = map(owc, write_buffers);
 
