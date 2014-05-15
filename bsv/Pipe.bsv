@@ -145,6 +145,27 @@ module mkFunnel#(PipeOut#(Vector#(mk,a)) in)(PipeOut#(Vector#(m, a)))
    endmethod
 endmodule
 
+module mkFunnel1#(PipeOut#(Vector#(k,a)) in)(PipeOut#(a))
+   provisos (Bits#(a, asz), Log#(k,ksz));
+
+   Reg#(Bit#(ksz)) selector <- mkReg(0);
+
+   method a first();
+      return in.first[selector];
+   endmethod
+   method Action deq();
+      if (selector == fromInteger(valueOf(k)-1)) begin
+	 in.deq();
+	 selector <= 0;
+      end
+      else
+	 selector <= selector + 1;
+   endmethod
+   method notEmpty();
+      return in.notEmpty();
+   endmethod
+endmodule
+
 module mkUnfunnel#(PipeOut#(Vector#(m,a)) in)(PipeOut#(Vector#(mk, a)))
    provisos (Mul#(m, k, mk),
 	     Bits#(a, asz),
@@ -196,6 +217,29 @@ module mkFunnelPipes#(Vector#(mk, PipeOut#(a)) ins)(Vector#(m, PipeOut#(a)))
    end
 
    return map(toPipeOut, fifos);
+endmodule
+
+module mkFunnelPipes1#(Vector#(k, PipeOut#(a)) ins)(PipeOut#(a))
+   provisos (Bits#(a, asz),
+	     Log#(k,ksz)
+      );
+   let k = fromInteger(valueOf(k));
+
+   Reg#(Bit#(ksz)) selector <- mkReg(0);
+
+   method a first();
+      return ins[selector].first();
+   endmethod
+   method Action deq();
+      ins[selector].deq();
+      if (selector == fromInteger(valueOf(k)-1))
+	 selector <= 0;
+   else
+      selector <= selector + 1;
+   endmethod
+   method Bool notEmpty();
+      return ins[selector].notEmpty();
+   endmethod
 endmodule
 
 module mkUnfunnelPipes#(Vector#(m, PipeOut#(a)) ins)(Vector#(mk, PipeOut#(a)))
