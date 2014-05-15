@@ -220,6 +220,13 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    Vector#(K, Reg#(Bit#(32))) lastMulin <- replicateM(mkReg(0));
    Vector#(12, Reg#(Bool))   latencyReported <- replicateM(mkReg(False));
 
+   Reg#(Bool) initialized <- mkReg(False);
+   rule init if (!initialized);
+      for (Integer chan = 0; chan < valueOf(K); chan = chan + 1)
+	 accumFifos[chan].enq(unpack(0));
+      initialized <= True;
+   endrule
+
 //   (* descending_urgency = "mulin,accout" *)
    rule mulin;
       let chan = chanReg;
@@ -237,20 +244,18 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
       end
 
       chanFifos[0].enq(chan);
-      chanFifos[1].enq(chan);
       chanReg <= (chan + 1);
       let a <- toGet(aFunnel).get();
       let b <- toGet(bFunnel).get();
 
       let first <- toGet(firstPipe).get();
-      if (first)
-	 accumFifos[chan].enq(unpack(0));
       //if (label == 0) $display("%08d label=%d mulin chan=%d first=%d", cycles, label, chan, first);
       mul.request.put(tuple2(a, b));
    endrule
 
    rule mulout;
       let chan <- toGet(chanFifos[0]).get();
+      chanFifos[1].enq(chan);
       //if (label == 0) $display("%08d label=%d mulout chan=%d", cycles, label, chan);
       match {.resp,.*} <- mul.response.get();
       let acc <- toGet(accumFifos[chan]).get();
@@ -258,15 +263,15 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
       adder.request.put(tuple2(resp,acc));
    endrule
 
-   rule accout;
+   rule accout if (initialized);
       let chan <- toGet(chanFifos[1]).get();
       //if (label == 0) $display("%08d label=%d accout chan=%d", cycles, label, chan);
       let last <- toGet(lastPipe).get;
       match {.acc,.*} <- adder.response.get();
       if (last)
 	 dotfifos[chan].enq(acc);
-      else
-	 accumFifos[chan].enq(acc);
+
+      accumFifos[chan].enq(last ? unpack(0) : acc);
    endrule
 
    Vector#(K,PipeOut#(Float)) dotpipes = map(toPipeOut, dotfifos);
@@ -547,6 +552,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       endrule
 
       rule sinkDone;
+	 $dumpoff();
 	 // each time we write a burst of k values via sinks
 	 //let index <- toGet(indexpipes[jj+kk+1]).get();
 	 let b <- sinks[j].vector.finish();
@@ -600,7 +606,6 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    method ActionValue#(Bool) finish();
       if (verbose) $display("mm.finish()");
       doneFifo.deq();
-      $dumpoff();
       return True;
    endmethod
 
