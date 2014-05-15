@@ -98,6 +98,14 @@ instance Connectable#(PipeOut#(a),Put#(a));
    endmodule
 endinstance
 
+function PipeOut#(a) unvectorPipeOut(PipeOut#(Vector#(1,a)) in);
+   return (interface PipeOut#(a);
+	      method first = in.first[0];
+	      method deq = in.deq;
+	      method notEmpty = in.notEmpty;
+	   endinterface);
+endfunction
+
 function PipeOut#(Tuple2#(a,b)) zipPipeOut(PipeOut#(a) ina, PipeOut#(b) inb);
       return (interface PipeOut#(Tuple2#(a,b));
 		 method Tuple2#(a,b) first(); return tuple2(ina.first, inb.first); endmethod
@@ -211,6 +219,20 @@ module mkUnfunnelPipes#(Vector#(m, PipeOut#(a)) ins)(Vector#(mk, PipeOut#(a)))
       endrule
    end
    return map(toPipeOut, fifos);
+endmodule
+
+module mkRepeat#(UInt#(n) repetitions, PipeOut#(a) inpipe)(PipeOut#(a));
+   Reg#(UInt#(n)) count <- mkReg(0);
+   method first = inpipe.first;
+   method Action deq();
+      let c = count + 1;
+      if (count == (repetitions - 1)) begin
+	 c = 0;
+	 inpipe.deq();
+      end
+      count <= c;
+   endmethod
+   method notEmpty = inpipe.notEmpty;
 endmodule
 
 module mkForkVector#(PipeOut#(a) inpipe)(Vector#(n, PipeOut#(a)))
