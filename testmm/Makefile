@@ -5,4 +5,5 @@ XBSVDIR=../../xbsv
 DBNDIR=..
 DBNTOPBSV=Top.bsv
 TESTCPPFILES=testmm.cpp
+XBSVFLAGS = -l opencv_core
 include ../Makefile.dbn
