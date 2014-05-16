@@ -35,6 +35,11 @@ typedef 4 NumMasters;
 typedef TMul#(TDiv#(TAdd#(K,J),NumMasters),NumMasters)  NumReadBuffers;
 typedef TMul#(TDiv#(J,NumMasters),NumMasters)  NumWriteBuffers;
 
+typedef 4                                        ReadClientFanout;
+typedef TDiv#(NumReadBuffers,ReadClientFanout)   NumReadClients;
+typedef 1                                        WriteClientFanout;
+typedef TDiv#(NumWriteBuffers,WriteClientFanout) NumWriteClients;
+
 module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    provisos (Add#(a__, addrWidth, 40),
 	     Add#(a__, b__, 40),
@@ -55,11 +60,31 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    
    Vector#(NumReadBuffers, DmaReadBuffer#(TMul#(32,N),BurstLen)) read_buffers <- replicateM(mkDmaReadBuffer);
    zipWithM(mkConnection, mm.readClients, map(ors, read_buffers));
-   let readClients = map(orc, read_buffers);
+   let readBufferClients = map(orc, read_buffers);
+
+   module mkFanoutReadClients#(Integer i)(ObjectReadClient#(TMul#(32,N)));
+      Vector#(ReadClientFanout, ObjectReadClient#(TMul#(32,N))) subReadClients = takeAt(i*valueOf(ReadClientFanout), readBufferClients);
+      let readMux <- mkDmaReadMux(subReadClients);
+      return readMux;
+   endmodule
+   Vector#(NumReadClients,ObjectReadClient#(TMul#(32,N))) readClients <- genWithM(mkFanoutReadClients);
 
    Vector#(NumWriteBuffers, DmaWriteBuffer#(TMul#(32,N),BurstLen)) write_buffers <- replicateM(mkDmaWriteBuffer);
    zipWithM(mkConnection, mm.writeClients, map(ows,takeAt(0,write_buffers)));
-   let writeClients = map(owc, write_buffers);
+   let writeBufferClients = map(owc, write_buffers);
+
+   Vector#(NumWriteClients,ObjectWriteClient#(TMul#(32,N))) writeClients;
+   if (valueOf(NumWriteClients) < valueOf(NumWriteBuffers)) begin
+      module mkFanoutWriteClients#(Integer i)(ObjectWriteClient#(TMul#(32,N)));
+	 Vector#(WriteClientFanout, ObjectWriteClient#(TMul#(32,N))) subWriteClients = takeAt(i*valueOf(WriteClientFanout), writeBufferClients);
+	 let writeMux <- mkDmaWriteMux(subWriteClients);
+	 return writeMux;
+      endmodule
+      writeClients <- genWithM(mkFanoutWriteClients);
+   end
+   else begin
+      writeClients = writeBufferClients;
+   end
 
    MemServer#(addrWidth, TMul#(32,N), NumMasters) dma <- mkMemServer(dmaIndicationProxy.ifc, readClients, writeClients);
    DmaConfigWrapper dmaConfigWrapper <- mkDmaConfigWrapper(DmaConfigPortal,dma.request);
