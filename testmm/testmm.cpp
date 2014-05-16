@@ -185,8 +185,10 @@ int main(int argc, const char **argv)
   fprintf(stderr, "memory write beats %ld utilization (beats/cycle): %f\n", write_beats, write_util);
 
   cv::Mat  m3 = pm1 * pm2.t();
-  dumpMat<float>("pm1 * pm2", "%5.1f", pm3);
-  dumpMat<float>("m1 * m2", "%5.1f", m3);
+  if (0) {
+    dumpMat<float>("pm1 * pm2", "%5.1f", pm3);
+    dumpMat<float>("m1 * m2", "%5.1f", m3);
+  }
   bool eq = std::equal(m3.begin<float>(), m3.end<float>(), pm3.begin<float>());
   fprintf(stderr, "eq=%d\n", eq);
   //device->finish();
