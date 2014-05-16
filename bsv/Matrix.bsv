@@ -185,6 +185,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    let mul_depth = valueOf(FP_MUL_DEPTH);
    Bool verbose = False; //label==0;
 
+   Reg#(Bool)      readyReg     <- mkReg(False);
    Reg#(UInt#(20)) numEltsReg   <- mkReg(0);
    Reg#(UInt#(20)) lastCountReg <- mkReg(0);
    Reg#(UInt#(20)) countReg     <- mkReg(0);
@@ -269,14 +270,13 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
       match {.acc,.*} <- adder.response.get();
       if (last)
 	 dotfifos[chan].enq(acc);
-
       accumFifos[chan].enq(last ? unpack(0) : acc);
    endrule
 
    Vector#(K,PipeOut#(Float)) dotpipes = map(toPipeOut, dotfifos);
 
    interface Put aInput;
-      method Action put(Float a);
+      method Action put(Float a) if (readyReg);
 
    	 afifo.enq(a);
 
@@ -296,9 +296,10 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    interface Put bInput   = toPut(bfifo);
    interface Vector pipes = dotpipes;
    interface Reg numElts;
-      method Action _write(UInt#(20) v);
+      method Action _write(UInt#(20) v) if (!readyReg);
 	 numEltsReg <= v;
 	 lastCountReg <= v-1;
+	 readyReg <= True;
       endmethod
       method _read = numEltsReg._read;
    endinterface
@@ -564,6 +565,22 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       endrule
    end
 
+   FIFO#(Bool) initNumEltsFifo <- mkFIFO();
+   rule dotProdsNumElts;
+      initNumEltsFifo.deq();
+      let numColumnsA = descriptorA.numColumns;
+      let numColumnsB = descriptorB.numColumns;
+      let numRowsB    = descriptorB.numRows;
+      for (Integer j = 0; j < jj; j = j + 1) begin
+	 startAOffset[j] <= fromInteger(j)*numColumnsA;
+	 startCOffset[j] <= fromInteger(j)*numRowsB;
+	 fxdotprods[j].numElts <= truncate(numColumnsA);
+      end
+      for (Integer k = 0; k < kk; k = k + 1) begin
+	 startBOffset[k] <= fromInteger(k)*numColumnsB;
+      end
+  endrule
+
    method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC) if (!running);
@@ -588,14 +605,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       offsetpipeA.start(offsetcfgA);
       offsetpipeB.start(offsetcfgB);
       offsetpipeC.start(offsetcfgC);
-      for (Integer j = 0; j < jj; j = j + 1) begin
-	 startAOffset[j] <= fromInteger(j)*numColumnsA;
-	 startCOffset[j] <= fromInteger(j)*numRowsB;
-	 fxdotprods[j].numElts <= truncate(numColumnsA);
-      end
-      for (Integer k = 0; k < kk; k = k + 1) begin
-	 startBOffset[k] <= fromInteger(k)*numColumnsB;
-      end
+
+      $display("initNumElts");
+      initNumEltsFifo.enq(True);
 
       $dumpfile("test.vcd");
       $dumpvars();
