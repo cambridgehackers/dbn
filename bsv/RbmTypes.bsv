@@ -20,18 +20,23 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+`ifdef DataBusWidth
+typedef TDiv#(`DataBusWidth,32) N;
+`else
 `ifndef N_VALUE
 typedef 2 N;
 `else
 typedef `N_VALUE N;
 `endif
+`endif
+
 `ifndef J_VALUE
-typedef 8 J;
+typedef 2 J;
 `else
 typedef `J_VALUE J;
 `endif
 `ifndef K_VALUE
-typedef 8 K;
+typedef 2 K;
 `else
 typedef `K_VALUE K;
 `endif
@@ -57,7 +62,8 @@ typedef enum {
    TimerIndicationPortal,
    TimerRequestPortal,
    FpMacRequestPortal,
-   FpMacIndicationPortal
+   FpMacIndicationPortal,
+   MmDebugIndicationPortal
 } IfcNames deriving (Eq,Bits);
 
 interface MmIndication;
@@ -113,3 +119,6 @@ interface RbmRequest;
     method Action finish(); // for bsim only
 endinterface
 
+interface MmDebugIndication;
+   method Action startSourceAndSink(UInt#(32) startA, UInt#(32) startC, Int#(32) jint);
+endinterface

@@ -34,6 +34,7 @@
 #include "RbmIndicationWrapper.h"
 #include "MmRequestProxy.h"
 #include "MmIndicationWrapper.h"
+#include "MmDebugIndicationWrapper.h"
 #include "SigmoidRequestProxy.h"
 #include "SigmoidIndicationWrapper.h"
 #include "TimerRequestProxy.h"
@@ -106,6 +107,16 @@ public:
     sem_post(&mul_sem);
     fprintf(stderr, "mmfDone cycles=%ld\n", cycles);
   }
+};
+
+class MmDebugIndication : public MmDebugIndicationWrapper {
+//wrapperClass
+public:
+ MmDebugIndication(int id, PortalPoller *poller = 0) : MmDebugIndicationWrapper(id, poller) {};
+  virtual void startSourceAndSink ( const unsigned int startA, const unsigned int startC, const int jint ) {
+    fprintf(stderr, "mm.startSourceAndSink startA=%6d startC=%06d jint=%d\n", startA, startC, jint);
+  }
+
 };
 
 class SigmoidIndication : public SigmoidIndicationWrapper
