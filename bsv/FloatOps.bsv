@@ -10,7 +10,9 @@ import Pipe::*;
 import FIFO::*;
 import FpMac::*;
 
+`ifdef BSIM
 //`define SINGLE_CYCLE_ALU
+`endif
 
 `ifdef SINGLE_CYCLE_ALU
 typedef 1 FP_ADD_DEPTH;
@@ -44,7 +46,11 @@ module mkFloatAdder#(RoundMode rmode)(FloatAlu#(FP_ADD_DEPTH));
 endmodule
 `else
 module mkFloatAdder#(RoundMode rmode)(FloatAlu#(FP_ADD_DEPTH));
+`ifdef BSIM
    let adder <- mkFPAdder(rmode);
+`else
+   let adder <- mkXilinxFPAdder(rmode);
+`endif
    interface Put request;
       method Action put(Tuple2#(Float,Float) req);
 	 match { .a, .b } = req;
@@ -94,7 +100,11 @@ module mkFloatMultiplier#(RoundMode rmode)(FloatAlu#(FP_MUL_DEPTH));
 endmodule
 `else
 module mkFloatMultiplier#(RoundMode rmode)(FloatAlu#(FP_MUL_DEPTH));
+`ifdef BSIM
    let multiplier <- mkFPMultiplier(rmode);
+`else
+   let multiplier <- mkXilinxFPMultiplier(rmode);
+`endif
    interface Put request;
       method Action put(Tuple2#(Float,Float) req);
          multiplier.request.put(req);
