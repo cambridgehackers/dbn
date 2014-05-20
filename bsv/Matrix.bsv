@@ -305,6 +305,75 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    endinterface
 endmodule : mkSharedDotProdServer
 
+interface MmTile;
+   interface Vector#(RowsPerTile, Put#(Float)) aInputs;
+   interface Vector#(RowsPerTile, Put#(Float)) bInputs;
+   interface Vector#(RowsPerTile, PipeOut#(Vector#(N, Float))) fxPipes;
+   interface Reg#(UInt#(20)) numElts;
+endinterface
+
+(* synthesize *)
+module mkMmTile#(UInt#(TLog#(T)) tile)(MmTile);
+
+   let rowsPerTile = valueOf(RowsPerTile);
+   let kk = valueOf(K);
+
+   Vector#(RowsPerTile, FIFOF#(Float))   aFifos <- replicateM(mkFIFOF);
+   Vector#(RowsPerTile, PipeOut#(Float)) aPipes = map(toPipeOut, aFifos);
+   Vector#(RowsPerTile,  FIFOF#(Float))   bFifos <- replicateM(mkFIFOF);
+   Vector#(RowsPerTile,  PipeOut#(Float)) bPipes = map(toPipeOut, bFifos);
+
+   function Module#(SharedDotProdServer#(K)) mkFxDotProd(Integer i);
+      return mkSharedDotProdServer(fromInteger(i));
+   endfunction
+   function Vector#(k,PipeOut#(Float)) getDotProdServerPipes(SharedDotProdServer#(k) s); return s.pipes; endfunction
+   Vector#(RowsPerTile, SharedDotProdServer#(K)) fxdotprods <- genWithM(mkFxDotProd);
+   Vector#(RowsPerTile, Vector#(K, PipeOut#(Float))) fxpipes = map(getDotProdServerPipes, fxdotprods);
+`define USE_MIMO_DFIFOS // this version is faster
+`ifndef USE_MIMO_DFIFOS
+   Vector#(RowsPerTile, PipeOut#(Vector#(K, Float))) fxPipesK <- mapM(mkJoinVector(id), fxpipes);
+   Vector#(RowsPerTile, PipeOut#(Vector#(N, Float))) fxPipesN <- mapM(mkFunnel, fxPipesK);
+`else
+   MIMOConfiguration mimoCfg = defaultValue;
+   Vector#(RowsPerTile, MIMO#(K,N,TAdd#(K,N),Float)) dfifos <- replicateM(mkMIMO(mimoCfg));
+   Vector#(RowsPerTile, PipeOut#(Vector#(N, Float))) fxPipesN = map(toPipeOut, dfifos);
+`endif
+   FirstLastPipe#(UInt#(MMSize)) firstLastPipe          <- mkFirstLastPipe();
+   Vector#(2, PipeOut#(Tuple2#(Bool,Bool))) firstLastPipes <- mkForkVector(firstLastPipe.pipe);
+
+   for (Integer j = 0; j < rowsPerTile; j = j + 1) begin
+      mkConnection(toGet(aPipes[j]), fxdotprods[j].aInput);
+      mkConnection(toGet(bPipes[j]), fxdotprods[j].bInput);
+   end
+
+`ifndef USE_MIMO_DFIFOS
+`else
+   for (Integer j = 0; j < rowsPerTile; j = j + 1) begin
+      rule dotProdValue;
+	 Vector#(K,Float) vs;
+	 for (Integer k = 0; k < kk; k = k + 1) begin
+	    let v <- toGet(fxpipes[j][k]).get();
+	    vs[k] = v;
+	 end
+	 dfifos[j].enq(fromInteger(kk), vs);
+      endrule
+   end
+`endif
+
+   interface Vector aInputs = map(toPut, aFifos);
+   interface Vector bInputs = map(toPut, bFifos);
+   interface Vector fxPipes = fxPipesN;
+   interface Reg numElts;
+      method Action _write(UInt#(20) v);
+	 for (Integer i = 0; i < rowsPerTile; i = i+1)
+	    fxdotprods[i].numElts <= v;
+      endmethod
+      method UInt#(20) _read();
+	 return fxdotprods[0].numElts;
+      endmethod
+   endinterface
+endmodule : mkMmTile
+
 function Vector#(TMul#(j,k), etype) flattenMatrix(Vector#(j, Vector#(k, etype)) mat);
    function etype flatten(Integer i); return mat[i/valueOf(k)][i%valueOf(k)]; endfunction
    return genWith(flatten);
@@ -419,6 +488,7 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
    let n = valueOf(N);
    let jj = valueOf(J);
    let kk = valueOf(K);
+   let tt = valueOf(T);
    let nshift = valueOf(nshift);
    Bool verbose = False;
    Bool verbose1 = False;
@@ -440,32 +510,30 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
       cycles <= cycles+1;
    endrule
 
-   function Module#(SharedDotProdServer#(K)) mkFxDotProd(Integer i);
-      return mkSharedDotProdServer(fromInteger(i));
-   endfunction
-   function Vector#(k,PipeOut#(Float)) getDotProdServerPipes(SharedDotProdServer#(k) s); return s.pipes; endfunction
-   Vector#(J, SharedDotProdServer#(K)) fxdotprods <- genWithM(mkFxDotProd);
-   Vector#(J, Vector#(K, PipeOut#(Float))) fxpipes = map(getDotProdServerPipes, fxdotprods);
+   Vector#(T, MmTile) mmTiles = newVector();
+   for (Integer t = 0; t < tt; t = t+1)
+      mmTiles[t] <- mkMmTile(fromInteger(t));
 
-   FirstLastPipe#(UInt#(addrwidth)) firstLastPipe          <- mkFirstLastPipe();
-   Vector#(2, PipeOut#(Tuple2#(Bool,Bool))) firstLastPipes <- mkForkVector(firstLastPipe.pipe);
+   Vector#(J, PipeOut#(Vector#(N,Float))) fxpipes;
+   for (Integer t = 0; t < valueOf(T); t = t+1) begin
+      for (Integer i = 0; i < valueof(RowsPerTile); i = i+1) begin
+	 let j = t*valueOf(RowsPerTile) + i;
 
-   for (Integer j = 0; j < jj; j = j + 1) begin
-      mkConnection(toGet(aPipes[j]), fxdotprods[j].aInput);
-      mkConnection(toGet(bPipes[j]), fxdotprods[j].bInput);
+	 mkConnection(toGet(aPipes[j]), mmTiles[t].aInputs[i]);
+	 mkConnection(toGet(bPipes[j]), mmTiles[t].bInputs[i]);
+
+	 fxpipes[j] = mmTiles[t].fxPipes[i];
+      end
    end
 
-   MIMOConfiguration mimoCfg = defaultValue;
-   MIMO#(K,N,TAdd#(K,N),Float) dfifo <- mkMIMO(mimoCfg);
-   Vector#(J, MIMO#(K,N,TAdd#(K,N),Float)) dfifos <- replicateM(mkMIMO(mimoCfg));
-   let sinks <- mapM(mkSink, map(toPipeOut, dfifos));
+   Vector#(J, DmaVectorSink#(dsz, Vector#(N, Float))) sinks <- mapM(mkSink, fxpipes);
 
    XYRangePipeIfc#(UInt#(addrwidth)) indexpipeifc <- mkXYRangePipeOut();
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeA <- mkXYRangePipeOut();
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeB <- mkXYRangePipeOut();
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeC <- mkXYRangePipeOut();
 
-   Vector#(TAdd#(TAdd#(J,J),K), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) indexpipes <- mkSizedForkVector(valueOf(SourceBufferSize), indexpipeifc.pipe);
+   Vector#(TAdd#(J,K), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) indexpipes <- mkSizedForkVector(valueOf(SourceBufferSize), indexpipeifc.pipe);
    Vector#(J, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesA <- mkSizedForkVector(valueOf(SourceBufferSize), offsetpipeA.pipe);
    Vector#(K, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesB <- mkSizedForkVector(valueOf(SourceBufferSize), offsetpipeB.pipe);
    Vector#(J, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesC <- mkSizedForkVector(valueOf(SourceBufferSize), offsetpipeC.pipe);
@@ -522,7 +590,7 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
 	    +fshow(" startC=")+fshow(startC)
 	    +fshow(" startC>>nshift=")+fshow(startC>>nshift)
 	    +fshow(" j=")+fshow(jint)));
-	 mmDebugIndication.startSourceAndSink(extend(startA), extend(startC), jint);
+	 //mmDebugIndication.startSourceAndSink(extend(startA), extend(startC), jint);
 
 	 sourceA[j].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[")+fshow(jint)+fshow("].start")+fshow(startA)));
@@ -534,22 +602,6 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
       rule finishSourceA;
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[0].finish ")));
 	 let b <- sourceA[j].finish();
-      endrule
-
-      rule dotProdValue;
-	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[jj+kk+j]).get();
-	 Vector#(K,Float) vs;
-	 for (Integer k = 0; k < kk; k = k + 1) begin
-	    let dpnum = j*kk+k;
-	    let v <- toGet(fxpipes[j][k]).get();
-	    //let indexi = tuple2(tpl_1(index), tpl_2(index)+fromInteger(k));
-	    //if (verbose) $display($format(fshow(cycles)+fshow("    dotprodvalue index=")+fshow(indexi)+fshow(" dotprod=")+fshow(v)));
-	    int jint = fromInteger(j);
-	    int kint = fromInteger(k);
-	    if (verbose1) $display($format(fshow(cycles)+fshow("    dotprodvalue pos=")+fshow(index)+fshow(tuple2(jint,kint))+fshow(" dotprod=")+fshow(pack(v))));
-	    vs[k] = v;
-	 end
-	 dfifos[j].enq(fromInteger(kk), vs);
       endrule
 
       rule sinkDone;
@@ -574,10 +626,12 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
       let numColumnsA = descriptorA.numColumns;
       let numColumnsB = descriptorB.numColumns;
       let numRowsB    = descriptorB.numRows;
+      for (Integer t = 0; t < tt; t = t+1) begin
+	 mmTiles[t].numElts <= truncate(numColumnsA);
+      end
       for (Integer j = 0; j < jj; j = j + 1) begin
 	 startAOffset[j] <= fromInteger(j)*numColumnsA;
 	 startCOffset[j] <= fromInteger(j)*numRowsB;
-	 fxdotprods[j].numElts <= truncate(numColumnsA);
       end
       for (Integer k = 0; k < kk; k = k + 1) begin
 	 startBOffset[k] <= fromInteger(k)*numColumnsB;
@@ -624,8 +678,6 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
 
    interface Vector writeClients = map(getSinkWriteClient, sinks);
 endmodule
-
-typedef 20 MMSize;
 
 interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
    interface Vector#(TAdd#(K,J), ObjectReadClient#(dmasz)) readClients;

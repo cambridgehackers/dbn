@@ -20,6 +20,8 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+typedef 20 MMSize;
+
 `ifdef DataBusWidth
 typedef TDiv#(`DataBusWidth,32) N;
 `else
@@ -41,8 +43,8 @@ typedef 2 K;
 typedef `K_VALUE K;
 `endif
 
-typedef TMul#(J,K) JK;
-typedef TMul#(JK,N) JNK;
+typedef TMin#(4,J) RowsPerTile;
+typedef TDiv#(J,RowsPerTile) T;
 
 typedef 15 BurstLen;
 
