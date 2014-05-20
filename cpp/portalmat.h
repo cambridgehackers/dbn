@@ -113,6 +113,11 @@ class MmDebugIndication : public MmDebugIndicationWrapper {
 //wrapperClass
 public:
  MmDebugIndication(int id, PortalPoller *poller = 0) : MmDebugIndicationWrapper(id, poller) {};
+  virtual ~MmDebugIndication() {};
+
+  void started() {
+    fprintf(stderr, "mm.started()\n");
+  }
   virtual void startSourceAndSink ( const unsigned int startA, const unsigned int startC, const int jint ) {
     fprintf(stderr, "mm.startSourceAndSink startA=%6d startC=%06d jint=%d\n", startA, startC, jint);
   }

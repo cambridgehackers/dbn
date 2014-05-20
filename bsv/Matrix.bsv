@@ -397,7 +397,7 @@ typedef enum {
  * Just considering memory bandwidth, every J+K cycles it is ready to perform J*K*N multiply accumulates.
  *
  */
-module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebug,
+module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
 				     Vector#(J, VectorSource#(dsz, Vector#(N, Float))) sourceA,
 				     Vector#(K, VectorSource#(dsz, Vector#(N, Float))) sourceB,
 				     function Module#(DmaVectorSink#(dsz, Vector#(N, Float))) mkSink(PipeOut#(Vector#(N, Float)) pipe_in)
@@ -522,7 +522,7 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebug,
 	    +fshow(" startC=")+fshow(startC)
 	    +fshow(" startC>>nshift=")+fshow(startC>>nshift)
 	    +fshow(" j=")+fshow(jint)));
-	 mmDebug.startSourceAndSink(extend(startA), extend(startC), jint);
+	 mmDebugIndication.startSourceAndSink(extend(startA), extend(startC), jint);
 
 	 sourceA[j].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[")+fshow(jint)+fshow("].start")+fshow(startA)));
@@ -587,6 +587,7 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebug,
    method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC) if (!running);
+      mmDebugIndication.started();
       XYRangeConfig#(UInt#(addrwidth)) indexcfg  = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: fromInteger(jj),
 								  ybase: 0, ylimit: numRowsB, ystep: fromInteger(kk) };
       XYRangeConfig#(UInt#(addrwidth)) offsetcfgA = XYRangeConfig {xbase: 0, xlimit: numRowsA*numColumnsA, xstep: numColumnsA*fromInteger(jj),

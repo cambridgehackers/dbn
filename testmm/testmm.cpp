@@ -23,6 +23,7 @@
 
 #include <MmRequestProxy.h>
 #include <MmIndicationWrapper.h>
+#include <MmDebugIndicationWrapper.h>
 #include <DmaConfigProxy.h>
 #include <GeneratedTypes.h>
 //#include <DmaIndicationWrapper.h>
@@ -44,6 +45,7 @@ static int verbose = 0;
 
 class SigmoidIndication;
 class MmIndication;
+class MmDebugIndication;
 
 RbmRequestProxy *rbmdevice = 0;
 MmRequestProxy *mmdevice = 0;
@@ -51,6 +53,7 @@ SigmoidIndication *sigmoidindication = 0;
 SigmoidRequestProxy *sigmoiddevice = 0;
 TimerRequestProxy *timerdevice = 0;
 MmIndication *mmdeviceIndication = 0;
+MmDebugIndication *mmDebugIndication = 0;
 TimerIndication *timerdeviceIndication = 0;
 DmaConfigProxy *dma = 0;
 DmaIndicationWrapper *dmaIndication = 0;
@@ -90,6 +93,7 @@ int main(int argc, const char **argv)
   fprintf(stderr, "%s %s\n", __DATE__, __TIME__);
   mmdevice = new MmRequestProxy(IfcNames_MmRequestPortal);
   mmdeviceIndication = new MmIndication(IfcNames_MmIndicationPortal);
+  mmDebugIndication = new MmDebugIndication(IfcNames_MmDebugIndicationPortal);
   timerdevice = new TimerRequestProxy(IfcNames_TimerRequestPortal);
   timerdeviceIndication = new TimerIndication(IfcNames_TimerIndicationPortal);
 

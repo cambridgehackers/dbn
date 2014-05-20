@@ -6,4 +6,5 @@ DBNDIR=..
 DBNTOPBSV=Top.bsv
 TESTCPPFILES=testmm.cpp
 XBSVFLAGS = -l opencv_core
+##USE_PRINTF = 1
 include ../Makefile.dbn

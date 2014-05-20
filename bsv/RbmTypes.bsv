@@ -120,5 +120,6 @@ interface RbmRequest;
 endinterface
 
 interface MmDebugIndication;
+   method Action started();
    method Action startSourceAndSink(UInt#(32) startA, UInt#(32) startC, Int#(32) jint);
 endinterface
