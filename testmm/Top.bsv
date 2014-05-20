@@ -24,6 +24,7 @@ import MmIndicationProxy::*;
 import MmRequestWrapper::*;
 import TimerIndicationProxy::*;
 import TimerRequestWrapper::*;
+import MmDebugIndicationProxy::*;
 
 // defined by user
 import Matrix::*;
@@ -52,9 +53,10 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
 
    DmaIndicationProxy dmaIndicationProxy <- mkDmaIndicationProxy(DmaIndicationPortal);
 
+   MmDebugIndicationProxy mmDebugIndicationProxy <- mkMmDebugIndicationProxy(MmDebugIndicationPortal);
    MmIndicationProxy mmIndicationProxy <- mkMmIndicationProxy(MmIndicationPortal);
    TimerIndicationProxy timerIndicationProxy <- mkTimerIndicationProxy(TimerIndicationPortal);
-   Mm#(N) mm <- mkMm(mmIndicationProxy.ifc, timerIndicationProxy.ifc);
+   Mm#(N) mm <- mkMm(mmIndicationProxy.ifc, timerIndicationProxy.ifc, mmDebugIndicationProxy.ifc);
    MmRequestWrapper mmRequestWrapper <- mkMmRequestWrapper(MmRequestPortal,mm.mmRequest);
    TimerRequestWrapper timerRequestWrapper <- mkTimerRequestWrapper(TimerRequestPortal,mm.timerRequest);
    
@@ -89,13 +91,14 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    MemServer#(addrWidth, TMul#(32,N), NumMasters) dma <- mkMemServer(dmaIndicationProxy.ifc, readClients, writeClients);
    DmaConfigWrapper dmaConfigWrapper <- mkDmaConfigWrapper(DmaConfigPortal,dma.request);
 
-   Vector#(6,StdPortal) portals;
+   Vector#(7,StdPortal) portals;
    portals[0] = mmRequestWrapper.portalIfc;
    portals[1] = mmIndicationProxy.portalIfc; 
    portals[2] = dmaConfigWrapper.portalIfc;
    portals[3] = dmaIndicationProxy.portalIfc; 
    portals[4] = timerRequestWrapper.portalIfc;
    portals[5] = timerIndicationProxy.portalIfc; 
+   portals[6] = mmDebugIndicationProxy.portalIfc;
    StdDirectory dir <- mkStdDirectory(portals);
    let ctrl_mux <- mkSlaveMux(dir,portals);
    
