@@ -276,7 +276,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    Vector#(K,PipeOut#(Float)) dotpipes = map(toPipeOut, dotfifos);
 
    interface Put aInput;
-      method Action put(Float a) if (readyReg);
+      method Action put(Float a); // if (readyReg);
 
    	 afifo.enq(a);
 
@@ -296,7 +296,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    interface Put bInput   = toPut(bfifo);
    interface Vector pipes = dotpipes;
    interface Reg numElts;
-      method Action _write(UInt#(20) v) if (!readyReg);
+      method Action _write(UInt#(20) v); // if (!readyReg);
 	 numEltsReg <= v;
 	 lastCountReg <= v-1;
 	 readyReg <= True;
