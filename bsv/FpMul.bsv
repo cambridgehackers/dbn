@@ -50,7 +50,7 @@ endinterface
 import "BVI" fp_mul =
 module mkFpMul(FpMul);
     default_clock aclk(aclk);
-    no_reset;
+    default_reset aresetn(aresetn);
     interface FpmulM_axis_result     m_axis_result;
         method m_axis_result_tdata tdata();
         method tready(m_axis_result_tready) enable((*inhigh*) EN_m_axis_result_tready);
