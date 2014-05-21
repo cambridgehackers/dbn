@@ -54,8 +54,6 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
 	     Add#(b__, g__, 44)
 	     );
 
-   MmDebugIndicationProxy mmDebugIndicationProxy <- mkMmDebugIndicationProxy(MmDebugIndicationPortal);
-
    DmaIndicationProxy dmaIndicationProxy <- mkDmaIndicationProxy(DmaIndicationPortal);
 
    MmDebugIndicationProxy mmDebugIndicationProxy <- mkMmDebugIndicationProxy(MmDebugIndicationPortal);
