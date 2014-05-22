@@ -24,6 +24,7 @@ import MmIndicationProxy::*;
 import MmRequestWrapper::*;
 import TimerIndicationProxy::*;
 import TimerRequestWrapper::*;
+import MmDebugRequestWrapper::*;
 import MmDebugIndicationProxy::*;
 
 // defined by user
@@ -62,6 +63,7 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    Mm#(N) mm <- mkMm(mmIndicationProxy.ifc, timerIndicationProxy.ifc, mmDebugIndicationProxy.ifc);
    MmRequestWrapper mmRequestWrapper <- mkMmRequestWrapper(MmRequestPortal,mm.mmRequest);
    TimerRequestWrapper timerRequestWrapper <- mkTimerRequestWrapper(TimerRequestPortal,mm.timerRequest);
+   MmDebugRequestWrapper mmDebugRequestWrapper <- mkMmDebugRequestWrapper(MmDebugRequestPortal,mm.mmDebugRequest);
    
    Vector#(NumReadBuffers, DmaReadBuffer#(TMul#(32,N),BurstLen)) read_buffers <- replicateM(mkDmaReadBuffer);
    zipWithM(mkConnection, mm.readClients, map(ors, read_buffers));
@@ -77,8 +79,8 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
       readClients <- genWithM(mkFanoutReadClients);
    end
    else begin
-      //readClients = take(readBufferClients);
-      readClients = readBufferClients;
+      readClients = take(readBufferClients);
+      //readClients = readBufferClients;
    end
 
    Vector#(NumWriteBuffers, DmaWriteBuffer#(TMul#(32,N),BurstLen)) write_buffers <- replicateM(mkDmaWriteBuffer);
@@ -89,7 +91,8 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    if (valueOf(NumWriteClients) < valueOf(NumWriteBuffers)) begin
       module mkFanoutWriteClients#(Integer i)(ObjectWriteClient#(TMul#(32,N)));
 	 Vector#(WriteClientFanout, ObjectWriteClient#(TMul#(32,N))) subWriteClients = takeAt(i*valueOf(WriteClientFanout), writeBufferClients);
-	 let writeMux <- mkDmaWriteMux(/* i*valueOf(WriteClientFanout), */ subWriteClients);
+	 let writeMux <- mkDmaWriteMux(//i*valueOf(WriteClientFanout),
+				       subWriteClients);
 	 return writeMux;
       endmodule
       writeClients <- genWithM(mkFanoutWriteClients);
@@ -108,7 +111,7 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    MemServer#(addrWidth, TMul#(32,N), NumMasters) dma <- mkMemServer(dmaIndicationProxy.ifc, readClients, writeClients);
    DmaConfigWrapper dmaConfigWrapper <- mkDmaConfigWrapper(DmaConfigPortal,dma.request);
 
-   Vector#(7,StdPortal) portals;
+   Vector#(8,StdPortal) portals;
    portals[0] = mmRequestWrapper.portalIfc;
    portals[1] = mmIndicationProxy.portalIfc; 
    portals[2] = dmaConfigWrapper.portalIfc;
@@ -116,6 +119,7 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    portals[4] = timerRequestWrapper.portalIfc;
    portals[5] = timerIndicationProxy.portalIfc; 
    portals[6] = mmDebugIndicationProxy.portalIfc;
+   portals[7] = mmDebugRequestWrapper.portalIfc;
    StdDirectory dir <- mkStdDirectory(portals);
    let ctrl_mux <- mkSlaveMux(dir,portals);
    

@@ -23,6 +23,7 @@
 
 #include <MmRequestProxy.h>
 #include <MmIndicationWrapper.h>
+#include <MmDebugRequestProxy.h>
 #include <MmDebugIndicationWrapper.h>
 #include <DmaConfigProxy.h>
 #include <GeneratedTypes.h>
@@ -53,6 +54,7 @@ SigmoidIndication *sigmoidindication = 0;
 SigmoidRequestProxy *sigmoiddevice = 0;
 TimerRequestProxy *timerdevice = 0;
 MmIndication *mmdeviceIndication = 0;
+MmDebugRequestProxy *mmDebugRequest = 0;
 MmDebugIndication *mmDebugIndication = 0;
 TimerIndication *timerdeviceIndication = 0;
 DmaConfigProxy *dma = 0;
@@ -93,6 +95,7 @@ int main(int argc, const char **argv)
   fprintf(stderr, "%s %s\n", __DATE__, __TIME__);
   mmdevice = new MmRequestProxy(IfcNames_MmRequestPortal);
   mmdeviceIndication = new MmIndication(IfcNames_MmIndicationPortal);
+  mmDebugRequest = new MmDebugRequestProxy(IfcNames_MmDebugRequestPortal);
   mmDebugIndication = new MmDebugIndication(IfcNames_MmDebugIndicationPortal);
   timerdevice = new TimerRequestProxy(IfcNames_TimerRequestPortal);
   timerdeviceIndication = new TimerIndication(IfcNames_TimerIndicationPortal);
@@ -173,6 +176,13 @@ int main(int argc, const char **argv)
 		81,82,83,84,85,86,87,88
 		);
 #endif
+  fprintf(stderr, "Testing add\n");
+  mmDebugRequest->add(2.0, 20.0);
+  sleep(1);
+  fprintf(stderr, "Testing mul\n");
+  mmDebugRequest->mul(2.0, 21.0);
+  sleep(1);
+
   PortalMat pm1(m1);
   PortalMat pm2(m2);
   PortalMat pm3;
