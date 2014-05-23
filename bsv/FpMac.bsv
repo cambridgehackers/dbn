@@ -1336,33 +1336,21 @@ module mkXilinxFPAdder#(RoundMode rmode)(Server#(Tuple2#(Float, Float), Tuple2#(
    let reset <- exposeCurrentReset();
 
    let fpAdd <- mkFpAdd();
-   Wire#(Bit#(1)) s_axis_ab_ready <- mkDWire(0);
-   Wire#(Bit#(1)) m_axis_tready <- mkDWire(0);
-   rule ab_ready;
-      fpAdd.s_axis_a.tvalid(s_axis_ab_ready);
-      fpAdd.s_axis_b.tvalid(s_axis_ab_ready);
-      fpAdd.s_axis_operation.tvalid(s_axis_ab_ready);
-   endrule
-   rule c_ready;
-      fpAdd.m_axis_result.tready(m_axis_tready);
-   endrule
-
    ////////////////////////////////////////////////////////////////////////////////
    /// Interface Connections / Methods
    ////////////////////////////////////////////////////////////////////////////////
    interface Put request;
-      method Action put(Tuple2#(Float,Float) req) if (fpAdd.s_axis_a.tready() == 1 && fpAdd.s_axis_b.tready() == 1);
+      method Action put(Tuple2#(Float,Float) req);
 	 match { .a, .b } = req;
-	 fpAdd.s_axis_a.tdata(pack(a));
-	 fpAdd.s_axis_b.tdata(pack(b));
-	 fpAdd.s_axis_operation.tdata(0);
-	 s_axis_ab_ready <= 1;
+	 fpAdd.s_axis_a(pack(a));
+	 fpAdd.s_axis_b(pack(b));
+	 fpAdd.s_axis_operation(0);
       endmethod
    endinterface
    interface Get response;
-      method ActionValue#(Tuple2#(Float,Exception)) get() if (fpAdd.m_axis_result.tvalid() == 1);
-	 m_axis_tready <= 1;
-	 return tuple2(unpack(fpAdd.m_axis_result.tdata()), defaultValue);
+      method ActionValue#(Tuple2#(Float,Exception)) get();
+	 let result <- fpAdd.m_axis_result();
+	 return tuple2(unpack(result), defaultValue);
       endmethod
    endinterface
 endmodule: mkXilinxFPAdder
