@@ -709,7 +709,6 @@ endmodule
 
 interface Mm#(numeric type n);
    interface MmRequest mmRequest;
-   interface MmDebugRequest mmDebugRequest;
    interface TimerRequest timerRequest;
    interface Vector#(TAdd#(K,J), ObjectReadClient#(TMul#(32,N))) readClients;
    interface Vector#(J, ObjectWriteClient#(TMul#(32,n))) writeClients;
@@ -746,18 +745,6 @@ module [Module] mkMm#(MmIndication ind, TimerIndication timerInd, MmDebugIndicat
 	 idleCount <= idleCount + 1;
    endrule
 
-   FloatAlu#(FP_ADD_DEPTH) adder <- mkFloatAdder(defaultValue);
-   FloatAlu#(FP_ADD_DEPTH) multiplier <- mkFloatMultiplier(defaultValue);
-
-   rule added;
-      match { .v, .* } <- adder.response.get();
-      mmDebugIndication.add(v);
-   endrule
-   rule multiplied;
-      match { .v, .* } <- multiplier.response.get();
-      mmDebugIndication.mul(v);
-   endrule
-
    interface TimerRequest timerRequest;
       method Action startTimer() if (!timerRunning.notEmpty());
 	 cycleCount <= 0;
@@ -782,14 +769,6 @@ module [Module] mkMm#(MmIndication ind, TimerIndication timerInd, MmDebugIndicat
       endmethod
    endinterface
 
-   interface MmDebugRequest mmDebugRequest;
-	 method Action add(Float a, Float b);
-	    adder.request.put(tuple2(a,b));
-	 endmethod
-	 method Action mul(Float a, Float b);
-	    multiplier.request.put(tuple2(a,b));
-	 endmethod
-   endinterface
    interface Vector readClients = dmaMMF.readClients;
    interface Vector writeClients =  dmaMMF.writeClients;
 

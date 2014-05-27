@@ -20,8 +20,6 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-import FloatingPoint::*;
-
 typedef 20 MMSize;
 
 `ifdef DataBusWidth
@@ -67,7 +65,6 @@ typedef enum {
    TimerRequestPortal,
    FpMacRequestPortal,
    FpMacIndicationPortal,
-   MmDebugRequestPortal,
    MmDebugIndicationPortal
 } IfcNames deriving (Eq,Bits);
 
@@ -124,13 +121,7 @@ interface RbmRequest;
     method Action finish(); // for bsim only
 endinterface
 
-interface MmDebugRequest;
-   method Action add(Float a, Float b);
-   method Action mul(Float a, Float b);
-endinterface
 interface MmDebugIndication;
    method Action started();
    method Action startSourceAndSink(UInt#(32) startA, UInt#(32) startC, Int#(32) jint);
-   method Action add(Float result);
-   method Action mul(Float result);
 endinterface
