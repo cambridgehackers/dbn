@@ -466,8 +466,7 @@ typedef enum {
  * Just considering memory bandwidth, every J+K cycles it is ready to perform J*K*N multiply accumulates.
  *
  */
-module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
-				     Vector#(J, VectorSource#(dsz, Vector#(N, Float))) sourceA,
+module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Float))) sourceA,
 				     Vector#(K, VectorSource#(dsz, Vector#(N, Float))) sourceB,
 				     function Module#(DmaVectorSink#(dsz, Vector#(N, Float))) mkSink(PipeOut#(Vector#(N, Float)) pipe_in)
 				     )(DmaMatrixMultiplyIfc#(addrwidth, dsz))
@@ -590,7 +589,6 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
 	    +fshow(" startC=")+fshow(startC)
 	    +fshow(" startC>>nshift=")+fshow(startC>>nshift)
 	    +fshow(" j=")+fshow(jint)));
-	 //mmDebugIndication.startSourceAndSink(extend(startA), extend(startC), jint);
 
 	 sourceA[j].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[")+fshow(jint)+fshow("].start")+fshow(startA)));
@@ -641,7 +639,6 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
    method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC) if (!running);
-      mmDebugIndication.started();
       XYRangeConfig#(UInt#(addrwidth)) indexcfg  = XYRangeConfig {xbase: 0, xlimit: numRowsA, xstep: fromInteger(jj),
 								  ybase: 0, ylimit: numRowsB, ystep: fromInteger(kk) };
       XYRangeConfig#(UInt#(addrwidth)) offsetcfgA = XYRangeConfig {xbase: 0, xlimit: numRowsA*numColumnsA, xstep: numColumnsA*fromInteger(jj),
@@ -689,12 +686,12 @@ interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
    method Bit#(32) dbg();
 endinterface
 
-//(* synthesize *)
-module [Module] mkDramMatrixMultiply#(MmDebugIndication mmDebugIndication)(DramMatrixMultiply#(N,TMul#(N,32)));
+(* synthesize *)
+module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
    Vector#(TAdd#(K,J), DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
    Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = takeAt(0,          map(dmaVectorSourceVector, vfsources));
    Vector#(K, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = takeAt(valueOf(J), map(dmaVectorSourceVector, vfsources));
-   DmaMatrixMultiplyIfc#(MMSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(mmDebugIndication, xvfsources, yvfsources, mkDmaVectorSink);
+   DmaMatrixMultiplyIfc#(MMSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
    interface Vector readClients = map(getSourceReadClient, vfsources);
    interface Vector writeClients = dmaMMF.writeClients;
    method start = dmaMMF.start;
@@ -722,7 +719,7 @@ module [Module] mkMm#(MmIndication ind, TimerIndication timerInd, MmDebugIndicat
 
    let n = valueOf(n);
 
-   DramMatrixMultiply#(N, TMul#(N,32)) dmaMMF <- mkDramMatrixMultiply(mmDebugIndication);
+   DramMatrixMultiply#(N, TMul#(N,32)) dmaMMF <- mkDramMatrixMultiply();
 
    Reg#(Bit#(64)) mmfCycles <- mkReg(0);
    rule countMmfCycles;
