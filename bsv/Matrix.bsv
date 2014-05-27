@@ -561,7 +561,6 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
 	    +fshow(" k=")+fshow(kint)));
 
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(kint)+fshow("].start")+fshow(startB)));
-	 if (k == 0) mmDebugIndication.startDotProd(extend(startB), kint);
 
 	 sourceB[k].start(descriptorB.pointer, pack(extend(startB>>nshift)), pack(extend(descriptorB.numColumns>>nshift)));
       endrule
@@ -591,7 +590,7 @@ module [Module] mkDmaMatrixMultiply#(MmDebugIndication mmDebugIndication,
 	    +fshow(" startC=")+fshow(startC)
 	    +fshow(" startC>>nshift=")+fshow(startC>>nshift)
 	    +fshow(" j=")+fshow(jint)));
-	 if (j == 0) mmDebugIndication.startSourceAndSink(extend(startA), extend(startC), jint);
+	 //mmDebugIndication.startSourceAndSink(extend(startA), extend(startC), jint);
 
 	 sourceA[j].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[")+fshow(jint)+fshow("].start")+fshow(startA)));

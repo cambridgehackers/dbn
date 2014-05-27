@@ -131,7 +131,6 @@ endinterface
 interface MmDebugIndication;
    method Action started();
    method Action startSourceAndSink(UInt#(32) startA, UInt#(32) startC, Int#(32) jint);
-   method Action startDotProd(UInt#(32) startB, Int#(32) kint);
    method Action add(Float result);
    method Action mul(Float result);
 endinterface
