@@ -121,9 +121,6 @@ public:
   virtual void startSourceAndSink ( const unsigned int startA, const unsigned int startC, const int jint ) {
     fprintf(stderr, "mm.startSourceAndSink startA=%6d startC=%06d jint=%d\n", startA, startC, jint);
   }
-  virtual void startDotProd ( const unsigned int startB, const int kint ) {
-    fprintf(stderr, "mm.startDotProd startB=%6d kint=%d\n", startB, kint);
-  }
   virtual void add(const float &f) {
     fprintf(stderr, "mm.add returned %f\n", f);
   }
