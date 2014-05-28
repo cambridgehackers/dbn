@@ -694,7 +694,7 @@ module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
    MemreadEngineV#(TMul#(N,32), J, J) rowReadEngine <- mkMemreadEngineV(rowFifos);
    MemreadEngineV#(TMul#(N,32), K, K) colReadEngine <- mkMemreadEngineV(colFifos);
    Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(rowReadEngine.readServers, rowFifos));
-   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources <- mapM(uncurry(mkVMemreadVectorSource), zip(colReadEngine.readServers, colFifos));
+   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(colReadEngine.readServers, colFifos));
    DmaMatrixMultiplyIfc#(MMSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
    interface Vector readClients = cons(rowReadEngine.dmaClient, cons(colReadEngine.dmaClient, nil));
    interface Vector writeClients = dmaMMF.writeClients;
