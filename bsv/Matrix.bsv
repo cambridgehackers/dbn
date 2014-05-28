@@ -266,9 +266,9 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
 
    rule accout if (initialized);
       let chan <- toGet(chanFifos[1]).get();
-      //if (label == 0) $display("%08d label=%d accout chan=%d", cycles, label, chan);
       let last <- toGet(lastPipe).get;
       match {.acc,.*} <- adder.response.get();
+      //if (label == 0) $display("%08d label=%d accout chan=%d acc=%x last=%d", cycles, label, chan, pack(acc), last);
       if (last)
 	 dotfifos[chan].enq(acc);
       accumFifos[chan].enq(last ? unpack(0) : acc);
@@ -491,7 +491,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    let tt = valueOf(T);
    let nshift = valueOf(nshift);
    Bool verbose = False;
-   Bool verbose1 = True;
+   Bool verbose1 = False;
    Bool timing = True;
 
    Reg#(UInt#(32)) cycles <- mkReg(0);
@@ -563,6 +563,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(kint)+fshow("].start")+fshow(startB)));
 
 	 sourceB[k].start(descriptorB.pointer, pack(extend(startB>>nshift)), pack(extend(descriptorB.numColumns>>nshift)));
+
       endrule
       rule finishSourceB;
 	 UInt#(TLog#(K)) in = fromInteger(k);
@@ -585,10 +586,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 let startC = startCBase + startCOffset[j] + offsetC;
 
 	 int jint = fromInteger(j);
-	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    start A/C index=")+fshow(tuple2(row,col))
+	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    start A index=")+fshow(tuple2(row,col))
 	    +fshow(" startA=")+fshow(startA)
 	    +fshow(" startC=")+fshow(startC)
-	    +fshow(" startC>>nshift=")+fshow(startC>>nshift)
 	    +fshow(" j=")+fshow(jint)));
 
 	 sourceA[j].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
@@ -665,8 +665,8 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       $display("initNumElts");
       initNumEltsFifo.enq(True);
 
-      $dumpfile("test.vcd");
-      $dumpvars();
+      //$dumpfile("test.vcd");
+      //$dumpvars();
    endmethod
    method ActionValue#(Bool) finish();
       if (verbose) $display("mm.finish()");
@@ -689,12 +689,10 @@ endinterface
 
 (* synthesize *)
 module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
-   Vector#(J, FIFOF#(Bit#(TMul#(N,32)))) rowFifos <- replicateM(mkFIFOF());
-   Vector#(K, FIFOF#(Bit#(TMul#(N,32)))) colFifos <- replicateM(mkFIFOF());
-   MemreadEngineV#(TMul#(N,32), J, J) rowReadEngine <- mkMemreadEngineV(rowFifos);
-   MemreadEngineV#(TMul#(N,32), K, K) colReadEngine <- mkMemreadEngineV(colFifos);
-   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(rowReadEngine.readServers, rowFifos));
-   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(colReadEngine.readServers, colFifos));
+   MemreadEngineV#(TMul#(N,32), 1, J) rowReadEngine <- mkMemreadEngineV();
+   MemreadEngineV#(TMul#(N,32), 1, K) colReadEngine <- mkMemreadEngineV();
+   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(rowReadEngine.readServers, rowReadEngine.dataPipes));
+   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(colReadEngine.readServers, colReadEngine.dataPipes));
    DmaMatrixMultiplyIfc#(MMSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
    interface Vector readClients = cons(rowReadEngine.dmaClient, cons(colReadEngine.dmaClient, nil));
    interface Vector writeClients = dmaMMF.writeClients;

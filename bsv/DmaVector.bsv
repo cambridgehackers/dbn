@@ -20,6 +20,7 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+import Connectable::*;
 import GetPut::*;
 import ClientServer::*;
 import FIFOF::*;
@@ -51,7 +52,7 @@ function ObjectReadClient#(asz) getSourceReadClient(DmaVectorSource#(asz,a) s); 
 function ObjectWriteClient#(asz) getSinkWriteClient(DmaVectorSink#(asz,a) s); return s.dmaClient; endfunction
 function VectorSource#(dsz, dtype) dmaVectorSourceVector(DmaVectorSource#(dsz,dtype) dmavs); return dmavs.vector; endfunction
 
-module [Module] mkMemreadVectorSource#(Server#(MemengineCmd,Bool) memreadEngine, FIFOF#(Bit#(asz)) dfifo)(VectorSource#(asz, a))
+module [Module] mkMemreadVectorSource#(Server#(MemengineCmd,Bool) memreadEngine, PipeOut#(Bit#(asz)) pipeOut)(VectorSource#(asz, a))
    provisos (Bits#(a,asz),
 	     Div#(asz,8,abytes),
 	     Log#(abytes,ashift),
@@ -64,12 +65,15 @@ module [Module] mkMemreadVectorSource#(Server#(MemengineCmd,Bool) memreadEngine,
    let abytes = valueOf(abytes);
    let ashift = valueOf(ashift);
 
+   FIFOF#(Bit#(asz)) buffer <- mkSizedFIFOF(2*valueOf(BurstLen));
+   mkConnection(toGet(pipeOut), toPut(buffer));
+
    method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
       if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
       memreadEngine.request.put(MemengineCmd { pointer: p, base: a << ashift, readLen: truncate(l << ashift), burstLen: (fromInteger(valueOf(BurstLen)) << ashift) });
    endmethod
    method finish = memreadEngine.response.get;
-   interface PipeOut pipe = mapPipe(unpack, toPipeOut(dfifo));
+   interface PipeOut pipe = mapPipe(unpack, toPipeOut(buffer));
 endmodule
 
 module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
