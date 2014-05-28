@@ -21,10 +21,12 @@
 // SOFTWARE.
 
 import GetPut::*;
+import ClientServer::*;
 import FIFOF::*;
 import PortalMemory::*;
 import Dma::*;
 import MemreadEngine::*;
+import MemreadEngineV::*;
 import MemwriteEngine::*;
 import Adapter::*;
 import BRAM::*;
@@ -48,6 +50,27 @@ endinterface
 function ObjectReadClient#(asz) getSourceReadClient(DmaVectorSource#(asz,a) s); return s.dmaClient; endfunction
 function ObjectWriteClient#(asz) getSinkWriteClient(DmaVectorSink#(asz,a) s); return s.dmaClient; endfunction
 function VectorSource#(dsz, dtype) dmaVectorSourceVector(DmaVectorSource#(dsz,dtype) dmavs); return dmavs.vector; endfunction
+
+module [Module] mkMemreadVectorSource#(Server#(MemengineCmd,Bool) memreadEngine, FIFOF#(Bit#(asz)) dfifo)(VectorSource#(asz, a))
+   provisos (Bits#(a,asz),
+	     Div#(asz,8,abytes),
+	     Log#(abytes,ashift),
+	     Mul#(abytes, 8, asz)
+	     );
+
+   Bool verbose = False;
+
+   let asz = valueOf(asz);
+   let abytes = valueOf(abytes);
+   let ashift = valueOf(ashift);
+
+   method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
+      if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
+      memreadEngine.request.put(MemengineCmd { pointer: p, base: a << ashift, readLen: truncate(l << ashift), burstLen: (fromInteger(valueOf(BurstLen)) << ashift) });
+   endmethod
+   method finish = memreadEngine.response.get;
+   interface PipeOut pipe = mapPipe(unpack, toPipeOut(dfifo));
+endmodule
 
 module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
    provisos (Bits#(a,asz),
