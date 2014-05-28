@@ -27,6 +27,7 @@ import DefaultValue::*;
 import SpecialFIFOs::*;
 import Vector::*;
 import BRAM::*;
+import MemreadEngineV::*;
 import DmaVector::*;
 import PortalMemory::*;
 import Dma::*;
@@ -490,7 +491,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    let tt = valueOf(T);
    let nshift = valueOf(nshift);
    Bool verbose = False;
-   Bool verbose1 = False;
+   Bool verbose1 = True;
    Bool timing = True;
 
    Reg#(UInt#(32)) cycles <- mkReg(0);
@@ -677,7 +678,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 endmodule
 
 interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
-   interface Vector#(TAdd#(K,J), ObjectReadClient#(dmasz)) readClients;
+   interface Vector#(2, ObjectReadClient#(dmasz)) readClients;
    interface Vector#(J, ObjectWriteClient#(dmasz)) writeClients;
    method Action start(ObjectPointer pointerA, UInt#(MMSize) numRowsA, UInt#(MMSize) numColumnsA,
 		       ObjectPointer pointerB, UInt#(MMSize) numRowsB, UInt#(MMSize) numColumnsB,
@@ -688,18 +689,19 @@ endinterface
 
 (* synthesize *)
 module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
-   Vector#(TAdd#(K,J), DmaVectorSource#(DmaSz, Vector#(N,Float))) vfsources <- replicateM(mkDmaVectorSource());
-   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources = takeAt(0,          map(dmaVectorSourceVector, vfsources));
-   Vector#(K, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources = takeAt(valueOf(J), map(dmaVectorSourceVector, vfsources));
+   Vector#(J, FIFOF#(Bit#(TMul#(N,32)))) rowFifos <- replicateM(mkFIFOF());
+   Vector#(K, FIFOF#(Bit#(TMul#(N,32)))) colFifos <- replicateM(mkFIFOF());
+   MemreadEngineV#(TMul#(N,32), J, J) rowReadEngine <- mkMemreadEngineV(rowFifos);
+   MemreadEngineV#(TMul#(N,32), K, K) colReadEngine <- mkMemreadEngineV(colFifos);
+   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(rowReadEngine.readServers, rowFifos));
+   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources <- mapM(uncurry(mkVMemreadVectorSource), zip(colReadEngine.readServers, colFifos));
    DmaMatrixMultiplyIfc#(MMSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
-   interface Vector readClients = map(getSourceReadClient, vfsources);
+   interface Vector readClients = cons(rowReadEngine.dmaClient, cons(colReadEngine.dmaClient, nil));
    interface Vector writeClients = dmaMMF.writeClients;
    method start = dmaMMF.start;
    method finish = dmaMMF.finish;
    method Bit#(32) dbg();
       Bit#(32) d = 0;
-      d[0] = pack(vfsources[0].vector.pipe.notEmpty());
-      d[1] = pack(vfsources[1].vector.pipe.notEmpty());
       return d;
    endmethod
 endmodule
@@ -707,7 +709,7 @@ endmodule
 interface Mm#(numeric type n);
    interface MmRequest mmRequest;
    interface TimerRequest timerRequest;
-   interface Vector#(TAdd#(K,J), ObjectReadClient#(TMul#(32,N))) readClients;
+   interface Vector#(2, ObjectReadClient#(TMul#(32,N))) readClients;
    interface Vector#(J, ObjectWriteClient#(TMul#(32,n))) writeClients;
 endinterface
 

@@ -36,7 +36,7 @@ typedef 1 NumMasters;
 typedef 1 NumMasters;
 `endif
 
-typedef TMul#(TDiv#(TAdd#(K,J),NumMasters),NumMasters)  NumReadBuffers;
+typedef TMul#(TDiv#(2,NumMasters),NumMasters)  NumReadBuffers;
 typedef TMul#(TDiv#(J,NumMasters),NumMasters)  NumWriteBuffers;
 
 typedef 1                                        ReadClientFanout;
