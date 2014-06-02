@@ -121,6 +121,9 @@ public:
   virtual void startSourceAndSink ( const unsigned int startA, const unsigned int startC, const int jint ) {
     fprintf(stderr, "mm.startSourceAndSink startA=%6d startC=%06d jint=%d\n", startA, startC, jint);
   }
+  virtual void debug ( uint32_t aNotEmpty, uint32_t bNotEmpty, uint32_t macCount) {
+    fprintf(stderr, "mmdebug aNotEmpty=%x bNotEmpty=%x macCount=%d\n", aNotEmpty, bNotEmpty, macCount);
+  }
 
 };
 

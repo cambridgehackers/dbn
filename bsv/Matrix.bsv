@@ -175,6 +175,7 @@ interface SharedDotProdServer#(numeric type k);
    interface Put#(Float)                 aInput;
    interface Put#(Float)                 bInput;
    interface Vector#(k, PipeOut#(Float)) pipes;
+   interface PipeOut#(Bit#(32)) macCount;
 endinterface
 
 (* synthesize *)
@@ -220,6 +221,8 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
 
    Vector#(K, Reg#(Bit#(32))) lastMulin <- replicateM(mkReg(0));
    Vector#(12, Reg#(Bool))   latencyReported <- replicateM(mkReg(False));
+
+   Reg#(Bit#(32)) macs <- mkReg(0);
 
    Reg#(Bool) initialized <- mkReg(False);
    rule init if (!initialized);
@@ -267,6 +270,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    rule accout if (initialized);
       let chan <- toGet(chanFifos[1]).get();
       let last <- toGet(lastPipe).get;
+      macs <= macs + 1;
       match {.acc,.*} <- adder.response.get();
       //if (label == 0) $display("%08d label=%d accout chan=%d acc=%x last=%d", cycles, label, chan, pack(acc), last);
       if (last)
@@ -304,6 +308,11 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
       endmethod
       method _read = numEltsReg._read;
    endinterface
+   method PipeOut#(Bit#(32)) macCount = (interface PipeOut#(Bit#(32));
+      method Bit#(32) first(); return macs; endmethod
+      method Action deq(); endmethod
+      method Bool notEmpty(); return False; endmethod
+      endinterface);
 endmodule : mkSharedDotProdServer
 
 interface MmTile;
@@ -311,6 +320,7 @@ interface MmTile;
    interface Vector#(RowsPerTile, Put#(Float)) bInputs;
    interface Vector#(RowsPerTile, PipeOut#(Vector#(N, Float))) fxPipes;
    interface Reg#(UInt#(20)) numElts;
+   interface PipeOut#(Bit#(32)) macCount;
 endinterface
 
 (* synthesize *)
@@ -361,6 +371,10 @@ module mkMmTile#(UInt#(TLog#(T)) tile)(MmTile);
    end
 `endif
 
+   function Bit#(32) my_add(Tuple2#(Bit#(32),Bit#(32)) ab); match { .a, .b } = ab; return a+b; endfunction
+   function PipeOut#(Bit#(32)) dotProdMacCount(SharedDotProdServer#(k) dotprodserver); return dotprodserver.macCount; endfunction
+   PipeOut#(Bit#(32)) macCountPipe <- mkReducePipes(mkMap(my_add), map(dotProdMacCount, fxdotprods));
+
    interface Vector aInputs = map(toPut, aFifos);
    interface Vector bInputs = map(toPut, bFifos);
    interface Vector fxPipes = fxPipesN;
@@ -373,6 +387,7 @@ module mkMmTile#(UInt#(TLog#(T)) tile)(MmTile);
 	 return fxdotprods[0].numElts;
       endmethod
    endinterface
+   interface PipeOut macCount = macCountPipe;
 endmodule : mkMmTile
 
 function Vector#(TMul#(j,k), etype) flattenMatrix(Vector#(j, Vector#(k, etype)) mat);
@@ -453,6 +468,7 @@ interface DmaMatrixMultiplyIfc#(numeric type addrwidth, numeric type dsz);
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC);
    method ActionValue#(Bool) finish();
+   method Tuple3#(Bit#(J),Bit#(K),Bit#(32)) dbg();
 endinterface
 
 typedef enum {
@@ -637,6 +653,15 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       end
   endrule
 
+   function Bit#(32) my_add(Tuple2#(Bit#(32),Bit#(32)) ab); match { .a, .b } = ab; return a+b; endfunction
+   function PipeOut#(Bit#(32)) mmTileMacCount(MmTile mmtile); return mmtile.macCount; endfunction
+   PipeOut#(Bit#(32)) macCountPipe <- mkReducePipes(mkMap(my_add), map(mmTileMacCount, mmTiles));
+   Reg#(Bit#(32)) macCount <- mkReg(0);
+   rule updateMacCount;
+      let mc <- toGet(macCountPipe).get();
+      macCount <= mc;
+   endrule
+
    method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC) if (!running);
@@ -673,6 +698,12 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       doneFifo.deq();
       return True;
    endmethod
+   method Tuple3#(Bit#(J),Bit#(K),Bit#(32)) dbg();
+      function Bool pipeNotEmpty(VectorSource#(asz, a) vs); return vs.pipe.notEmpty(); endfunction
+      Vector#(J,Bool) aNotEmpty = map(pipeNotEmpty, sourceA);
+      Vector#(K,Bool) bNotEmpty = map(pipeNotEmpty, sourceB);
+      return tuple3(pack(aNotEmpty), pack(bNotEmpty), macCount);
+   endmethod
 
    interface Vector writeClients = map(getSinkWriteClient, sinks);
 endmodule
@@ -684,7 +715,7 @@ interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
 		       ObjectPointer pointerB, UInt#(MMSize) numRowsB, UInt#(MMSize) numColumnsB,
 		       ObjectPointer pointerC);
    method ActionValue#(Bool) finish();
-   method Bit#(32) dbg();
+   method Tuple3#(Bit#(J),Bit#(K),Bit#(32)) dbg();
 endinterface
 
 (* synthesize *)
@@ -698,14 +729,14 @@ module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
    interface Vector writeClients = dmaMMF.writeClients;
    method start = dmaMMF.start;
    method finish = dmaMMF.finish;
-   method Bit#(32) dbg();
-      Bit#(32) d = 0;
-      return d;
+   method Tuple3#(Bit#(J),Bit#(K),Bit#(32)) dbg();
+      return dmaMMF.dbg();
    endmethod
 endmodule
 
 interface Mm#(numeric type n);
    interface MmRequest mmRequest;
+   interface MmDebugRequest mmDebugRequest;
    interface TimerRequest timerRequest;
    interface Vector#(2, ObjectReadClient#(TMul#(32,N))) readClients;
    interface Vector#(J, ObjectWriteClient#(TMul#(32,n))) writeClients;
@@ -763,6 +794,12 @@ module [Module] mkMm#(MmIndication ind, TimerIndication timerInd, MmDebugIndicat
 		      h3);
 	 mmfCycles <= 0;
 	 busyFifo.enq(True);
+      endmethod
+   endinterface
+   interface MmDebugRequest mmDebugRequest;
+      method Action debug();
+	 match { .aNotEmpty, .bNotEmpty, .macCount } = dmaMMF.dbg();
+	 mmDebugIndication.debug(extend(aNotEmpty), extend(bNotEmpty), macCount);
       endmethod
    endinterface
 

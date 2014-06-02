@@ -24,6 +24,7 @@
 #include <MmRequestProxy.h>
 #include <MmIndicationWrapper.h>
 #include <MmDebugIndicationWrapper.h>
+#include <MmDebugRequestProxy.h>
 #include <DmaConfigProxy.h>
 #include <GeneratedTypes.h>
 //#include <DmaIndicationWrapper.h>
@@ -49,6 +50,7 @@ class MmDebugIndication;
 
 RbmRequestProxy *rbmdevice = 0;
 MmRequestProxy *mmdevice = 0;
+MmDebugRequestProxy *mmdebug = 0;
 SigmoidIndication *sigmoidindication = 0;
 SigmoidRequestProxy *sigmoiddevice = 0;
 TimerRequestProxy *timerdevice = 0;
@@ -74,10 +76,13 @@ void dump(const char *prefix, char *buf, size_t len)
 void *dbgThread(void *)
 {
   while (1) {
-    sleep(1);
+    sleep(2);
     if (dma) {
       dma->getStateDbg(ChannelType_Read);
-      sleep(5);
+    }
+    if (mmdebug) {
+      fprintf(stderr, "Calling mmdebug->debug()\n");
+      mmdebug->debug();
     }
   }
   return 0;
@@ -92,6 +97,7 @@ int main(int argc, const char **argv)
     matrixSize = strtoul(argv[1], 0, 0);
   fprintf(stderr, "%s %s\n", __DATE__, __TIME__);
   mmdevice = new MmRequestProxy(IfcNames_MmRequestPortal);
+  mmdebug = new MmDebugRequestProxy(IfcNames_MmDebugRequestPortal);
   mmdeviceIndication = new MmIndication(IfcNames_MmIndicationPortal);
   mmDebugIndication = new MmDebugIndication(IfcNames_MmDebugIndicationPortal);
   timerdevice = new TimerRequestProxy(IfcNames_TimerRequestPortal);
