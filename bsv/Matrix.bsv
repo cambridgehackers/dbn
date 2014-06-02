@@ -176,6 +176,7 @@ interface SharedDotProdServer#(numeric type k);
    interface Put#(Float)                 bInput;
    interface Vector#(k, PipeOut#(Float)) pipes;
    interface PipeOut#(Bit#(32)) macCount;
+   method    Bit#(TLog#(k)) chan();
 endinterface
 
 (* synthesize *)
@@ -195,6 +196,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    FloatAlu#(FP_MUL_DEPTH) mul   <- mkFloatMultiplier(defaultValue);
    FloatAlu#(FP_ADD_DEPTH) adder <- mkFloatAdder(defaultValue);
 
+   // afifo receives one value per K values received on bfifo
    FIFOF#(Float)                          afifo   <- mkFIFOF();
    PipeOut#(Float)                        aFunnel <- mkRepeat(repetitions, toPipeOut(afifo));
 
@@ -313,6 +315,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
       method Action deq(); endmethod
       method Bool notEmpty(); return False; endmethod
       endinterface);
+   method    Bit#(TLog#(K)) chan(); return chanReg; endmethod
 endmodule : mkSharedDotProdServer
 
 interface MmTile;
@@ -323,14 +326,16 @@ interface MmTile;
    interface PipeOut#(Bit#(32)) macCount;
    method Bit#(RowsPerTile) aNotEmpty;
    method Bit#(RowsPerTile) bNotEmpty;
+   method Vector#(RowsPerTile, Bit#(TLog#(K))) dotProdChan;
 endinterface
 
 (* synthesize *)
-module mkMmTile#(UInt#(TLog#(T)) tile)(MmTile);
+module [Module] mkMmTile#(UInt#(TLog#(T)) tile)(MmTile);
 
    let rowsPerTile = valueOf(RowsPerTile);
    let kk = valueOf(K);
 
+   // aFifos receives one value per K values on bFifos
    Vector#(RowsPerTile, FIFOF#(Float))   aFifos <- replicateM(mkFIFOF);
    Vector#(RowsPerTile, PipeOut#(Float)) aPipes = map(toPipeOut, aFifos);
    Vector#(RowsPerTile,  FIFOF#(Float))   bFifos <- replicateM(mkFIFOF);
@@ -374,7 +379,8 @@ module mkMmTile#(UInt#(TLog#(T)) tile)(MmTile);
 
    function Bool fifofNotEmpty(FIFOF#(a) fifof); return fifof.notEmpty(); endfunction
    function Bit#(32) my_add(Tuple2#(Bit#(32),Bit#(32)) ab); match { .a, .b } = ab; return a+b; endfunction
-   function PipeOut#(Bit#(32)) dotProdMacCount(SharedDotProdServer#(k) dotprodserver); return dotprodserver.macCount; endfunction
+   function Bit#(TLog#(K)) getDotProdChan(SharedDotProdServer#(K) dotprodserver); return dotprodserver.chan; endfunction
+   function PipeOut#(Bit#(32)) dotProdMacCount(SharedDotProdServer#(K) dotprodserver); return dotprodserver.macCount; endfunction
    PipeOut#(Bit#(32)) macCountPipe <- mkReducePipes(mkMap(my_add), map(dotProdMacCount, fxdotprods));
 
    interface Vector aInputs = map(toPut, aFifos);
@@ -392,6 +398,7 @@ module mkMmTile#(UInt#(TLog#(T)) tile)(MmTile);
    interface PipeOut macCount = macCountPipe;
    method Bit#(RowsPerTile) aNotEmpty(); return pack(map(fifofNotEmpty, aFifos)); endmethod
    method Bit#(RowsPerTile) bNotEmpty(); return pack(map(fifofNotEmpty, bFifos)); endmethod
+   method Vector#(RowsPerTile, Bit#(TLog#(K))) dotProdChan(); return map(getDotProdChan, fxdotprods); endmethod
 endmodule : mkMmTile
 
 function Vector#(TMul#(j,k), etype) flattenMatrix(Vector#(j, Vector#(k, etype)) mat);
@@ -472,7 +479,7 @@ interface DmaMatrixMultiplyIfc#(numeric type addrwidth, numeric type dsz);
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC);
    method ActionValue#(Bool) finish();
-   method Tuple5#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K)) dbg();
+   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K),Bit#(32)) dbg();
 endinterface
 
 typedef enum {
@@ -521,10 +528,10 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    Reg#(MatrixDescriptor#(UInt#(addrwidth))) descriptorC <- mkReg(unpack(0));
    Reg#(UInt#(addrwidth)) dotprodCount <- mkReg(0);
 
-   Vector#(J, PipeOut#(Float))             aPipes     <- mapM(mkFunnel1, map(vectorSourcePipe, sourceA));
-   Vector#(K, PipeOut#(Float))             bPipesK    <- mapM(mkFunnel1, map(vectorSourcePipe, sourceB));
-   PipeOut#(Float)                         bFunnel    <- mkFunnelPipes1(bPipesK);
-   Vector#(J, PipeOut#(Float))             bPipes     <- mkForkVector(bFunnel);
+   Vector#(J, PipeOut#(Float))       aPipes <- mapM(mkFunnel1, map(vectorSourcePipe, sourceA));
+   Vector#(K, PipeOut#(Float))       bPipes <- mapM(mkFunnel1, map(vectorSourcePipe, sourceB));
+   PipeOut#(Float)                  bFunnel <- mkFunnelPipes1(bPipes);
+   Vector#(J, PipeOut#(Float)) bFunnelPipes <- mkForkVector(bFunnel);
 
    rule countCycles;
       cycles <= cycles+1;
@@ -540,7 +547,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 let j = t*valueOf(RowsPerTile) + i;
 
 	 mkConnection(toGet(aPipes[j]), mmTiles[t].aInputs[i]);
-	 mkConnection(toGet(bPipes[j]), mmTiles[t].bInputs[i]);
+	 mkConnection(toGet(bFunnelPipes[j]), mmTiles[t].bInputs[i]);
 
 	 fxpipes[j] = mmTiles[t].fxPipes[i];
       end
@@ -666,8 +673,10 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       macCount <= mc;
    endrule
 
+   function Vector#(RowsPerTile, Bit#(TLog#(K))) getMmTileChans(MmTile mmtile); return mmtile.dotProdChan; endfunction
    function Bit#(RowsPerTile) getMmTilesANotEmpty(MmTile mmtile); return mmtile.aNotEmpty; endfunction
    function Bit#(RowsPerTile) getMmTilesBNotEmpty(MmTile mmtile); return mmtile.bNotEmpty; endfunction
+
    method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC) if (!running);
@@ -704,13 +713,14 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       doneFifo.deq();
       return True;
    endmethod
-   method Tuple5#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K)) dbg();
+   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K),Bit#(32)) dbg();
       function Bool pipeNotEmpty(VectorSource#(asz, a) vs); return vs.pipe.notEmpty(); endfunction
       Vector#(J,Bool) aNotEmpty = map(pipeNotEmpty, sourceA);
       Vector#(K,Bool) bNotEmpty = map(pipeNotEmpty, sourceB);
       Bit#(J) mmtilesANotEmpty = pack(map(getMmTilesANotEmpty, mmTiles));
       Bit#(J) mmtilesBNotEmpty = pack(map(getMmTilesBNotEmpty, mmTiles));
-      return tuple5(pack(aNotEmpty), pack(bNotEmpty), macCount, mmtilesANotEmpty, mmtilesBNotEmpty);
+      Vector#(T, Vector#(RowsPerTile, Bit#(TLog#(K)))) chans = map(getMmTileChans, mmTiles);
+      return tuple6(pack(aNotEmpty), pack(bNotEmpty), macCount, mmtilesANotEmpty, mmtilesBNotEmpty, extend(pack(chans)));
    endmethod
 
    interface Vector writeClients = map(getSinkWriteClient, sinks);
@@ -723,7 +733,7 @@ interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
 		       ObjectPointer pointerB, UInt#(MMSize) numRowsB, UInt#(MMSize) numColumnsB,
 		       ObjectPointer pointerC);
    method ActionValue#(Bool) finish();
-   method Tuple5#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K)) dbg();
+   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K),Bit#(32)) dbg();
 endinterface
 
 (* synthesize *)
@@ -737,7 +747,7 @@ module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
    interface Vector writeClients = dmaMMF.writeClients;
    method start = dmaMMF.start;
    method finish = dmaMMF.finish;
-   method Tuple5#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K)) dbg();
+   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K),Bit#(32)) dbg();
       return dmaMMF.dbg();
    endmethod
 endmodule
@@ -806,8 +816,8 @@ module [Module] mkMm#(MmIndication ind, TimerIndication timerInd, MmDebugIndicat
    endinterface
    interface MmDebugRequest mmDebugRequest;
       method Action debug();
-	 match { .aNotEmpty, .bNotEmpty, .macCount, .mmTilesANE, .mmTilesBNE } = dmaMMF.dbg();
-	 mmDebugIndication.debug(extend(aNotEmpty), extend(bNotEmpty), macCount, extend(mmTilesANE), extend(mmTilesBNE));
+	 match { .aNotEmpty, .bNotEmpty, .macCount, .mmTilesANE, .mmTilesBNE, .chans } = dmaMMF.dbg();
+	 mmDebugIndication.debug(extend(aNotEmpty), extend(bNotEmpty), macCount, extend(mmTilesANE), extend(mmTilesBNE), chans);
       endmethod
    endinterface
 

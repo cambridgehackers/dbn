@@ -129,5 +129,5 @@ endinterface
 interface MmDebugIndication;
    method Action started();
    method Action startSourceAndSink(UInt#(32) startA, UInt#(32) startC, Int#(32) jint);
-   method Action debug(Bit#(32) aNotEmpty, Bit#(32) bNotEmpty, Bit#(32) macCount, Bit#(32) mmtilesANotEmpty, Bit#(32) mmtilesBNotEmpty);
+   method Action debug(Bit#(32) aNotEmpty, Bit#(32) bNotEmpty, Bit#(32) macCount, Bit#(32) mmtilesANotEmpty, Bit#(32) mmtilesBNotEmpty, Bit#(32) chans);
 endinterface
