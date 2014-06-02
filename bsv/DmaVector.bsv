@@ -70,7 +70,7 @@ module [Module] mkMemreadVectorSource#(Server#(MemengineCmd,Bool) memreadEngine,
 
    method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
       if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
-      memreadEngine.request.put(MemengineCmd { pointer: p, base: a << ashift, readLen: truncate(l << ashift), burstLen: (fromInteger(valueOf(BurstLen)) << ashift) });
+      memreadEngine.request.put(MemengineCmd { pointer: p, base: a << ashift, len: truncate(l << ashift), burstLen: (fromInteger(valueOf(BurstLen)) << ashift) });
    endmethod
    method finish = memreadEngine.response.get;
    interface PipeOut pipe = mapPipe(unpack, toPipeOut(buffer));
