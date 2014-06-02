@@ -326,7 +326,7 @@ interface MmTile;
    interface PipeOut#(Bit#(32)) macCount;
    method Bit#(RowsPerTile) aNotEmpty;
    method Bit#(RowsPerTile) bNotEmpty;
-   method Vector#(RowsPerTile, Bit#(TLog#(K))) dotProdChan;
+   method Vector#(RowsPerTile, Bit#(TLog#(K))) dotProdChan();
 endinterface
 
 (* synthesize *)
@@ -479,7 +479,7 @@ interface DmaMatrixMultiplyIfc#(numeric type addrwidth, numeric type dsz);
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC);
    method ActionValue#(Bool) finish();
-   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K),Bit#(32)) dbg();
+   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(J),Bit#(32)) dbg();
 endinterface
 
 typedef enum {
@@ -713,7 +713,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       doneFifo.deq();
       return True;
    endmethod
-   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K),Bit#(32)) dbg();
+   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(J),Bit#(32)) dbg();
       function Bool pipeNotEmpty(VectorSource#(asz, a) vs); return vs.pipe.notEmpty(); endfunction
       Vector#(J,Bool) aNotEmpty = map(pipeNotEmpty, sourceA);
       Vector#(K,Bool) bNotEmpty = map(pipeNotEmpty, sourceB);
@@ -733,7 +733,7 @@ interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
 		       ObjectPointer pointerB, UInt#(MMSize) numRowsB, UInt#(MMSize) numColumnsB,
 		       ObjectPointer pointerC);
    method ActionValue#(Bool) finish();
-   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K),Bit#(32)) dbg();
+   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(J),Bit#(32)) dbg();
 endinterface
 
 (* synthesize *)
@@ -741,13 +741,13 @@ module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
    MemreadEngineV#(TMul#(N,32), 1, J) rowReadEngine <- mkMemreadEngineV();
    MemreadEngineV#(TMul#(N,32), 1, K) colReadEngine <- mkMemreadEngineV();
    Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(rowReadEngine.readServers, rowReadEngine.dataPipes));
-   Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(colReadEngine.readServers, colReadEngine.dataPipes));
+   Vector#(K, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(colReadEngine.readServers, colReadEngine.dataPipes));
    DmaMatrixMultiplyIfc#(MMSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
    interface Vector readClients = cons(rowReadEngine.dmaClient, cons(colReadEngine.dmaClient, nil));
    interface Vector writeClients = dmaMMF.writeClients;
    method start = dmaMMF.start;
    method finish = dmaMMF.finish;
-   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(K),Bit#(32)) dbg();
+   method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(J),Bit#(32)) dbg();
       return dmaMMF.dbg();
    endmethod
 endmodule
