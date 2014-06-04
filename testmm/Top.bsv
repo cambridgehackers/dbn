@@ -40,10 +40,9 @@ typedef 1 NumMasters;
 typedef TMul#(TDiv#(2,NumMasters),NumMasters)  NumReadBuffers;
 typedef TMul#(TDiv#(J,NumMasters),NumMasters)  NumWriteBuffers;
 
-typedef 1                                        ReadClientFanout;
-typedef TDiv#(NumReadBuffers,ReadClientFanout)   NumReadClients;
-typedef 1                                        WriteClientFanout;
-typedef TDiv#(NumWriteBuffers,WriteClientFanout) NumWriteClients;
+typedef NumReadBuffers  NumReadClients;
+typedef NumWriteBuffers NumWriteClients;
+
 
 module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    provisos (Add#(a__, addrWidth, 40),
@@ -67,39 +66,11 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    
    Vector#(NumReadBuffers, DmaReadBuffer#(TMul#(32,N),BurstLen)) read_buffers <- replicateM(mkDmaReadBuffer);
    zipWithM(mkConnection, mm.readClients, map(ors, read_buffers));
-   let readBufferClients = map(orc, read_buffers);
-
-   Vector#(NumReadClients,ObjectReadClient#(TMul#(32,N))) readClients;
-   if (valueOf(NumReadClients) < valueOf(NumReadBuffers)) begin
-      module mkFanoutReadClients#(Integer i)(ObjectReadClient#(TMul#(32,N)));
-	 Vector#(ReadClientFanout, ObjectReadClient#(TMul#(32,N))) subReadClients = takeAt(i*valueOf(ReadClientFanout), readBufferClients);
-	 let readMux <- mkDmaReadMux(subReadClients);
-	 return readMux;
-      endmodule
-      readClients <- genWithM(mkFanoutReadClients);
-   end
-   else begin
-      //readClients = take(readBufferClients);
-      readClients = readBufferClients;
-   end
+   Vector#(NumReadClients,ObjectReadClient#(TMul#(32,N))) readClients = map(orc, read_buffers);
 
    Vector#(NumWriteBuffers, DmaWriteBuffer#(TMul#(32,N),BurstLen)) write_buffers <- replicateM(mkDmaWriteBuffer);
    zipWithM(mkConnection, mm.writeClients, map(ows,takeAt(0,write_buffers)));
-   let writeBufferClients = map(owc, write_buffers);
-
-   Vector#(NumWriteClients,ObjectWriteClient#(TMul#(32,N))) writeClients;
-   if (valueOf(NumWriteClients) < valueOf(NumWriteBuffers)) begin
-      module mkFanoutWriteClients#(Integer i)(ObjectWriteClient#(TMul#(32,N)));
-	 Vector#(WriteClientFanout, ObjectWriteClient#(TMul#(32,N))) subWriteClients = takeAt(i*valueOf(WriteClientFanout), writeBufferClients);
-	 let writeMux <- mkDmaWriteMux(/* i*valueOf(WriteClientFanout), */ subWriteClients);
-	 return writeMux;
-      endmodule
-      writeClients <- genWithM(mkFanoutWriteClients);
-   end
-   else begin
-      //writeClients = take(writeBufferClients);
-      writeClients = writeBufferClients;
-   end
+   Vector#(NumWriteClients,ObjectWriteClient#(TMul#(32,N))) writeClients = map(owc, write_buffers);
 
    Reg#(Bool) once <- mkReg(False);
    rule foobar if (!once);
