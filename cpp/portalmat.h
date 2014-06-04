@@ -28,6 +28,9 @@
 #include <stdio.h>
 #include <sys/mman.h>
 
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+
 #include <portal.h>
 #include "DmaConfigProxy.h"
 #include "RbmRequestProxy.h"
@@ -122,7 +125,7 @@ public:
     fprintf(stderr, "mm.startSourceAndSink startA=%6d startC=%06d jint=%d\n", startA, startC, jint);
   }
   virtual void debug ( uint32_t aNotEmpty, uint32_t bNotEmpty, uint32_t macCount, uint32_t mmtilesANE, uint32_t mmtilesBNE, uint64_t chans) {
-    fprintf(stderr, "mmdebug aNotEmpty=%x bNotEmpty=%x macCount=%d ane=%x bne=%x chans=%llx\n", aNotEmpty, bNotEmpty, macCount, mmtilesANE, mmtilesBNE, chans);
+    fprintf(stderr, "mmdebug aNotEmpty=%x bNotEmpty=%x macCount=%d ane=%x bne=%x chans="PRIu64"\n", aNotEmpty, bNotEmpty, macCount, mmtilesANE, mmtilesBNE, chans);
   }
 
 };
