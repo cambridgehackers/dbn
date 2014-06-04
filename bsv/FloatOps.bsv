@@ -10,42 +10,13 @@ import Pipe::*;
 import FIFO::*;
 import FpMac::*;
 
-`ifdef BSIM
-//`define SINGLE_CYCLE_ALU
-`endif
-
-`ifdef SINGLE_CYCLE_ALU
-typedef 1 FP_ADD_DEPTH;
-typedef 1 FP_MUL_DEPTH;
-`else
-typedef 5 FP_ADD_DEPTH;
-typedef 5 FP_MUL_DEPTH;
-`endif
-
-interface FloatAlu#(numeric type n);
+interface FloatAlu;
    interface Put#(Tuple2#(Float,Float)) request;
    interface Get#(Tuple2#(Float,Exception)) response;
 endinterface
 
 (* synthesize *)
-`ifdef SINGLE_CYCLE_ALU
-module mkFloatAdder#(RoundMode rmode)(FloatAlu#(FP_ADD_DEPTH));
-   let foo <- mkSizedFIFO(valueOf(FP_ADD_DEPTH)+1);
-   interface Put request;
-      method Action put(Tuple2#(Float,Float) req);
-	 match { .a, .b } = req;
-	 foo.enq(a+b);
-      endmethod
-   endinterface
-   interface Get response;
-      method ActionValue#(Tuple2#(Float,Exception)) get();
-	 let resp <- toGet(foo).get;
-	 return tuple2(resp,defaultValue);
-      endmethod
-   endinterface
-endmodule
-`else
-module mkFloatAdder#(RoundMode rmode)(FloatAlu#(FP_ADD_DEPTH));
+module mkFloatAdder#(RoundMode rmode)(FloatAlu);
 `ifdef BSIM
    let adder <- mkFPAdder(rmode);
 `else
@@ -65,7 +36,6 @@ module mkFloatAdder#(RoundMode rmode)(FloatAlu#(FP_ADD_DEPTH));
       endmethod
    endinterface
 endmodule
-`endif
 
 module mkFloatAddPipe#(PipeOut#(Tuple2#(Float,Float)) xypipe)(PipeOut#(Float));
    let adder <- mkFloatAdder(defaultValue);
@@ -83,23 +53,7 @@ module mkFloatAddPipe#(PipeOut#(Tuple2#(Float,Float)) xypipe)(PipeOut#(Float));
 endmodule
 
 (* synthesize *)
-`ifdef SINGLE_CYCLE_ALU
-module mkFloatMultiplier#(RoundMode rmode)(FloatAlu#(FP_MUL_DEPTH));
-   let foo <- mkSizedFIFO(valueOf(FP_MUL_DEPTH)+1);
-   interface Put request;
-      method Action put(Tuple2#(Float,Float) req);
-	 foo.enq(tpl_1(req)*tpl_2(req));
-      endmethod
-   endinterface
-   interface Get response;
-      method ActionValue#(Tuple2#(Float,Exception)) get();
-	 let resp <- toGet(foo).get;
-	 return tuple2(resp,defaultValue);
-      endmethod
-   endinterface
-endmodule
-`else
-module mkFloatMultiplier#(RoundMode rmode)(FloatAlu#(FP_MUL_DEPTH));
+module mkFloatMultiplier#(RoundMode rmode)(FloatAlu);
 `ifdef BSIM
    let multiplier <- mkFPMultiplier(rmode);
 `else
@@ -117,7 +71,7 @@ module mkFloatMultiplier#(RoundMode rmode)(FloatAlu#(FP_MUL_DEPTH));
       endmethod
    endinterface
 endmodule
-`endif
+
 
 (* synthesize *)
 module mkFloatMac#(RoundMode rmode) (Server#(Tuple3#(Maybe#(Float), Float, Float), Tuple2#(Float,Exception)));

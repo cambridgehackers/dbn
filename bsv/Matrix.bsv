@@ -39,137 +39,6 @@ import RbmTypes::*;
 import Assert::*;
 import Connectable::*;
 
-interface DotProdServer#(numeric type n);
-   interface Reg#(UInt#(20)) numElts;
-   interface Put#(Tuple2#(Vector#(n,Float),Vector#(n,Float))) request;
-   interface PipeOut#(Float) pipe;
-endinterface
-
-//(* synthesize *)
-module [Module] mkDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(DotProdServer#(N));
-
-   let n = valueOf(N);
-   let add_depth = valueOf(FP_ADD_DEPTH);
-   let mul_depth = valueOf(FP_MUL_DEPTH);
-   Bool verbose = False; //label==0;
-
-   Reg#(Bit#(TAdd#(TLog#(FP_ADD_DEPTH),1))) initCnt <- mkReg(0);
-   FIFO#(void) initCtrl <- mkSizedFIFO(1);
-
-   Reg#(UInt#(20)) numEltsReg <- mkReg(0);
-   Reg#(UInt#(20)) countInReg <- mkReg(0);
-
-   Vector#(N, FloatAlu#(FP_MUL_DEPTH)) muls <- replicateM(mkFloatMultiplier(defaultValue));
-   Vector#(N, FloatAlu#(FP_ADD_DEPTH)) adders <- replicateM(mkFloatAdder(defaultValue));
-
-   Vector#(N,FIFOF#(Tuple2#(Float,Float))) abfifos <- replicateM(mkFIFOF());
-   Vector#(N,FIFOF#(Bool)) lastFifos <- replicateM(mkSizedFIFOF(mul_depth));
-
-   Vector#(N, Reg#(Bit#(TAdd#(TLog#(FP_ADD_DEPTH),1)))) drainCnts <- replicateM(mkReg(0));
-   Vector#(N, Reg#(Bool)) drained <- replicateM(mkReg(False));
-
-   Reg#(Maybe#(Float)) accum <- mkReg(Nothing);
-   FIFOF#(Float) dotfifo <- mkFIFOF;
-
-   function Bit#(TLog#(N)) i_v(Integer i) = fromInteger(i);
-
-   rule init if (initCnt > 0);
-      for(Integer i = 0; i < n; i = i + 1)
-	 adders[i].request.put(tuple2(0,0));
-      initCnt <= initCnt - 1;
-      if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" initCnt=")+fshow(initCnt)));
-   endrule
-
-   for (Integer i = 0; i < n; i = i + 1)
-      rule mul;
-	 // this rule could be folded into the 'put' method to reduce latency
-	 match {.x,.y} <- toGet(abfifos[i]).get;
-	 muls[i].request.put(tuple2(x, y));
-	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" mul=")+fshow(i_v(i))));
-      endrule
-
-   for (Integer i = 0; i < n; i = i + 1)
-      rule acc if (drainCnts[i] == 0 && initCnt == 0);
-	 match {.resp,.*} <- muls[i].response.get();
-	 match {.acc,.*} <- adders[i].response.get;
-	 adders[i].request.put(tuple2(resp,acc));
-	 let last <- toGet(lastFifos[i]).get;
-	 if (last) begin
-	    if (i>0)
-	       drainCnts[i] <= fromInteger(add_depth);
-	    else
-	       drainCnts[i] <= fromInteger((add_depth*2)-1); // is this correct??
-	 end
-	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" acc=")+fshow(i_v(i))+fshow(" last=")+fshow(last)));
-      endrule
-
-   for (Integer i = 1; i < n; i = i + 1)
-      rule gather if (drainCnts[i] > 0);
-	 let new_cnt = drainCnts[i]-1;
-	 drained[i] <= (new_cnt==0);
-	 drainCnts[i] <= new_cnt;
-	 match {.a,.*} <- adders[0].response.get;
-	 match {.b,.*} <- adders[i].response.get;
-	 adders[0].request.put(tuple2(a,b));
-	 if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" gather=")+fshow(i_v(i))+fshow(" drainCnt=")+fshow(drainCnts[i])));
-      endrule
-
-   // the reference-guide says this should work, but it doesn't compile:
-   // let gathered = and(tail(drained));
-   function Bool is_true(Bool b) = b;
-   let gathered = all(is_true, readVReg(tail(drained)));
-   // this will only work correctly when add_depth is odd
-   rule drain if (gathered && drainCnts[0] > 0);
-      let new_cnt = drainCnts[0]-1;
-      match {.a,.*} <- adders[0].response.get;
-      drainCnts[0] <= new_cnt;
-      let enq = False;
-      if(accum matches tagged Valid .v) begin
-	 adders[0].request.put(tuple2(a,v));
-	 dynamicAssert(new_cnt > 0, "mkDotProdServer::drain");
-	 enq = True;
-	 accum <= tagged Invalid;
-      end
-      else begin
-	 if (new_cnt == 0) begin
-	    dotfifo.enq(a);
-	    initCtrl.deq;
-	 end
-	 else
-	    accum <= tagged Valid a;
-      end
-      if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" drain0=")+fshow(enq)+fshow(" drainCnt=")+fshow(drainCnts[0])));
-   endrule
-
-   PipeOut#(Float) dotpipe = toPipeOut(dotfifo);
-   interface Put request;
-      method Action put(Tuple2#(Vector#(N,Float),Vector#(N,Float)) tpl);
-	 if (countInReg == 0) begin
-	    initCtrl.enq(?);
-	    initCnt <= fromInteger(add_depth);
-	 end
-	 let c = countInReg+fromInteger(n);
-	 Bool isLast = (c >= numEltsReg);
-	 if (isLast) begin
-	    c = 0;
-	 end
-	 countInReg <= c;
-	 match { .avec, .bvec } = tpl;
-	 function Action enqvalues(Integer i);
-	    action
-	       abfifos[i].enq(tuple2(avec[i], bvec[i]));
-	       lastFifos[i].enq(isLast);
-	       //if (verbose) $display($format(fshow("label=")+fshow(label)+fshow(" countInReg=(")+fshow(countInReg)+fshow("/")+fshow(numEltsReg)+fshow(") dotprod x=") + fshow(avec[i]) + fshow(" y=") + fshow(bvec[i])));
-	    endaction
-	 endfunction
-	 Vector#(N, Integer) indices = genVector();
-	 mapM_(enqvalues, indices);
-      endmethod
-   endinterface : request
-   interface PipeOut pipe = dotpipe;
-   interface Reg numElts = numEltsReg;
-endmodule : mkDotProdServer
-
 interface SharedDotProdDebug#(numeric type k);
    interface PipeOut#(Bit#(32)) macCount;
    method    Bit#(TLog#(k)) chan();
@@ -188,8 +57,6 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
 
    let n = valueOf(N);
    UInt#(TAdd#(TLog#(K),1)) repetitions = fromInteger(valueOf(K));
-   let add_depth = valueOf(FP_ADD_DEPTH);
-   let mul_depth = valueOf(FP_MUL_DEPTH);
    Bool verbose = False; //label==0;
 
    Reg#(Bool)      readyReg     <- mkReg(False);
@@ -197,8 +64,8 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    Reg#(UInt#(20)) lastCountReg <- mkReg(0);
    Reg#(UInt#(20)) countReg     <- mkReg(0);
 
-   FloatAlu#(FP_MUL_DEPTH) mul   <- mkFloatMultiplier(defaultValue);
-   FloatAlu#(FP_ADD_DEPTH) adder <- mkFloatAdder(defaultValue);
+   FloatAlu mul   <- mkFloatMultiplier(defaultValue);
+   FloatAlu adder <- mkFloatAdder(defaultValue);
 
    // afifo receives one value per K values received on bfifo
    FIFOF#(Float)                          afifo   <- mkFIFOF();
