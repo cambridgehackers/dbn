@@ -46,7 +46,7 @@ typedef `K_VALUE K;
 typedef TMin#(4,J) RowsPerTile;
 typedef TDiv#(J,RowsPerTile) T;
 
-typedef 15 BurstLen;
+typedef 16 BurstLen;
 
 typedef 4 SourceBufferSize;
 
