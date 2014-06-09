@@ -27,10 +27,10 @@ import DefaultValue::*;
 import SpecialFIFOs::*;
 import Vector::*;
 import BRAM::*;
-import MemreadEngineV::*;
 import DmaVector::*;
 import PortalMemory::*;
-import Dma::*;
+import MemTypes::*;
+import MemreadEngine::*;
 import FloatingPoint::*;
 import Pipe::*;
 import FloatOps::*;
@@ -446,12 +446,24 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 
    Reg#(Bool) running <- mkReg(False);
    FIFOF#(Bool) doneFifo <- mkFIFOF();
-
+   
+   
+   Vector#(J, FIFO#(void)) startACtrl <- replicateM(mkSizedFIFO(1));
+   Vector#(K, FIFO#(void)) startBCtrl <- replicateM(mkSizedFIFO(1));
+   
+					
+   rule flow_ctrl;
+      for(Integer i = 0; i < jj; i=i+1)
+	 startACtrl[i].enq(?);
+      for(Integer i = 0; i < kk; i=i+1)
+	 startBCtrl[i].deq;
+   endrule
+				
    Vector#(J, Reg#(UInt#(addrwidth))) startAOffset <- replicateM(mkReg(0));
    Vector#(K, Reg#(UInt#(addrwidth))) startBOffset <- replicateM(mkReg(0));
    Vector#(J, Reg#(UInt#(addrwidth))) startCOffset <- replicateM(mkReg(0));
    for (Integer k = 0; k < kk; k = k + 1) begin
-      rule startDotProds;
+      rule startSourceB;
 	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[k]).get();
 	 match { .unusedB, .startBBase } <- toGet(offsetpipesB[k]).get();
 
@@ -472,15 +484,18 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 
       endrule
       rule finishSourceB;
+	 startBCtrl[k].enq(?);
 	 UInt#(TLog#(K)) in = fromInteger(k);
 	 int kint = fromInteger(k);
-	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(kint)+fshow("].finish")));
+	 if (timing || verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(kint)+fshow("].finish")));
 	 let b <- sourceB[k].finish();
       endrule
    end
    for (Integer j = 0; j < jj; j = j + 1) begin
 
-      rule startSourceAndSink;
+      int jint = fromInteger(j);
+      rule startSourceAandSink;
+	 startACtrl[j].deq;
 	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[j+kk]).get();
 
 	 let row = tpl_1(index)+fromInteger(j);
@@ -491,8 +506,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 let startA = startABase + startAOffset[j];
 	 let startC = startCBase + startCOffset[j] + offsetC;
 
-	 int jint = fromInteger(j);
-	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    start A index=")+fshow(tuple2(row,col))
+	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    startA index=")+fshow(tuple2(row,col))
 	    +fshow(" startA=")+fshow(startA)
 	    +fshow(" startC=")+fshow(startC)
 	    +fshow(" j=")+fshow(jint)));
@@ -505,18 +519,18 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       endrule
 
       rule finishSourceA;
-	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[0].finish ")));
+	 if (timing || verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[")+fshow(jint)+fshow("].finish ")));
 	 let b <- sourceA[j].finish();
       endrule
 
-      rule sinkDone;
+      rule finishSink;
 	 $dumpoff();
 	 // each time we write a burst of k values via sinks
 	 //let index <- toGet(indexpipes[jj+kk+1]).get();
 	 let b <- sinks[j].vector.finish();
 	 let c = dotprodCount-fromInteger(kk);
 	 int jint = fromInteger(j);
-	 if (verbose1) $display($format(fshow(cycles)+fshow("    sinkDone c")+fshow(c)+fshow(" j=")+fshow(jint)));
+	 if (verbose1) $display($format(fshow(cycles)+fshow("    finishSink c")+fshow(c)+fshow(" j=")+fshow(jint)));
 	 dotprodCount <= c;
 	 if (c == 0) begin
 	    running <= False;

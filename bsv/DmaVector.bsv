@@ -25,14 +25,14 @@ import GetPut::*;
 import ClientServer::*;
 import FIFOF::*;
 import PortalMemory::*;
-import Dma::*;
+import MemTypes::*;
 import MemreadEngine::*;
-import MemreadEngineV::*;
 import MemwriteEngine::*;
 import Adapter::*;
 import BRAM::*;
 import Pipe::*;
 import RbmTypes::*;
+import MemTypes::*;
 
 interface VectorSource#(numeric type dsz, type a);
    interface PipeOut#(a) pipe;
@@ -89,17 +89,16 @@ module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
    let abytes = valueOf(abytes);
    let ashift = valueOf(ashift);
 
-   FIFOF#(Bit#(asz)) dfifo <- mkSizedFIFOF(8);
-   MemreadEngine#(asz) memreadEngine <- mkMemreadEngine(2, dfifo);
+   MemreadEngine#(asz,2) memreadEngine <- mkMemreadEngine;
 
    interface ObjectReadClient dmaClient = memreadEngine.dmaClient;
    interface VectorSource vector;
        method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
 	  if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
-          memreadEngine.start(p, a << ashift, truncate(l << ashift), (fromInteger(valueOf(BurstLen)) << ashift));
+          memreadEngine.readServers[0].request.put(MemengineCmd{pointer:p, base:a << ashift, len:truncate(l << ashift), burstLen:(fromInteger(valueOf(BurstLen)) << ashift)});
        endmethod
       method ActionValue#(Bool) finish();
-	 let b <- memreadEngine.finish();
+	 let b <- memreadEngine.readServers[0].response.get;
 	 return b;
       endmethod
 //      method Fmt dbg();
@@ -107,13 +106,13 @@ module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
 //      endmethod
        interface PipeOut pipe;
 	  method first();
-	     return unpack(dfifo.first());
+	     return unpack(memreadEngine.dataPipes[0].first);
 	  endmethod
 	  method Action deq();
-	     if (verbose) $display("ObjectReadClient pipe.deq() data=%h", dfifo.first);
-	     dfifo.deq;
+	     if (verbose) $display("ObjectReadClient pipe.deq() data=%h", memreadEngine.dataPipes[0].first);
+	     memreadEngine.dataPipes[0].deq;
 	  endmethod
-	  method notEmpty = dfifo.notEmpty;
+	  method notEmpty = memreadEngine.dataPipes[0].notEmpty;
        endinterface
    endinterface
 endmodule
@@ -138,25 +137,22 @@ module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
    let ashift = valueOf(ashift);
 
    Bool verbose = False;
+      
+   MemwriteEngine#(asz,2) memwriteEngine <- mkMemwriteEngine;
 
-   FIFOF#(Bit#(asz)) fifo_in = (interface FIFOF;
-				   method Bit#(asz) first(); return pack(pipe_in.first()); endmethod
-				   method Bool notEmpty(); return pipe_in.notEmpty(); endmethod
-				   method Action deq(); pipe_in.deq(); endmethod
-				   method Action enq(Bit#(asz) v); endmethod
-				   method Action clear(); endmethod
-				   method Bool notFull(); return False; endmethod
-				endinterface);
-   MemwriteEngine#(asz) memwriteEngine <- mkMemwriteEngine(2, fifo_in);
+   rule connect_pipes;
+      let v <- toGet(pipe_in).get;
+      memwriteEngine.dataPipes[0].enq(pack(v));
+   endrule
 
    interface ObjectWriteClient dmaClient = memwriteEngine.dmaClient;
    interface VectorSink vector;
        method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
 	  if (verbose) $display("DmaVectorSink.start   p=%d offset=%h l=%h", p, a, l);
-	  memwriteEngine.start(p, a << ashift, truncate(l << ashift), fromInteger(valueOf(BurstLen)) << ashift);
+	  memwriteEngine.writeServers[0].request.put(MemengineCmd{pointer:p, base:a << ashift, len:truncate(l << ashift), burstLen:fromInteger(valueOf(BurstLen)) << ashift});
        endmethod
       method ActionValue#(Bool) finish();
-	 let b <- memwriteEngine.finish();
+	 let b <- memwriteEngine.writeServers[0].response.get;
 	 return b;
       endmethod
    endinterface

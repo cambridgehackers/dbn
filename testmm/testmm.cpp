@@ -92,9 +92,6 @@ int main(int argc, const char **argv)
 {
   unsigned int srcGen = 0;
 
-  int matrixSize = 64;
-  if (argc > 1)
-    matrixSize = strtoul(argv[1], 0, 0);
   fprintf(stderr, "%s %s\n", __DATE__, __TIME__);
   mmdevice = new MmRequestProxy(IfcNames_MmRequestPortal);
   mmdebug = new MmDebugRequestProxy(IfcNames_MmDebugRequestPortal);
@@ -129,6 +126,9 @@ int main(int argc, const char **argv)
 
 #define LARGE_MAT
 #ifdef LARGE_MAT
+  int matrixSize = 64;
+  if (argc > 1)
+    matrixSize = strtoul(argv[1], 0, 0);
   cv::Mat m1 = (cv::Mat_<float>(matrixSize,matrixSize) <<
 		11,12,13,14,15,16,17,18,11,12,13,14,15,16,17,18,11,12,13,14,15,16,17,18,11,12,13,14,15,16,17,18,
 		21,22,23,24,25,26,27,28,21,22,23,24,25,26,27,28,21,22,23,24,25,26,27,28,21,22,23,24,25,26,27,28,
