@@ -398,7 +398,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    let nshift = valueOf(nshift);
    Bool verbose = False;
    Bool verbose1 = False;
-   Bool timing = True;
+   Bool timing = False;
 
    Reg#(UInt#(32)) cycles <- mkReg(0);
    Reg#(Bool) doneReg <- mkReg(False);
@@ -448,17 +448,6 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    FIFOF#(Bool) doneFifo <- mkFIFOF();
    
    
-   Vector#(J, FIFO#(void)) startACtrl <- replicateM(mkSizedFIFO(1));
-   Vector#(K, FIFO#(void)) startBCtrl <- replicateM(mkSizedFIFO(1));
-   
-					
-   rule flow_ctrl;
-      for(Integer i = 0; i < jj; i=i+1)
-	 startACtrl[i].enq(?);
-      for(Integer i = 0; i < kk; i=i+1)
-	 startBCtrl[i].deq;
-   endrule
-				
    Vector#(J, Reg#(UInt#(addrwidth))) startAOffset <- replicateM(mkReg(0));
    Vector#(K, Reg#(UInt#(addrwidth))) startBOffset <- replicateM(mkReg(0));
    Vector#(J, Reg#(UInt#(addrwidth))) startCOffset <- replicateM(mkReg(0));
@@ -484,7 +473,6 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 
       endrule
       rule finishSourceB;
-	 startBCtrl[k].enq(?);
 	 UInt#(TLog#(K)) in = fromInteger(k);
 	 int kint = fromInteger(k);
 	 if (timing || verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(kint)+fshow("].finish")));
@@ -495,7 +483,6 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 
       int jint = fromInteger(j);
       rule startSourceAandSink;
-	 startACtrl[j].deq;
 	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[j+kk]).get();
 
 	 let row = tpl_1(index)+fromInteger(j);
