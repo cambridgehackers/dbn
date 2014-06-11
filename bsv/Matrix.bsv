@@ -618,8 +618,8 @@ endinterface
 
 (* synthesize *)
 module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
-   MemreadEngineV#(TMul#(N,32), 1, J) rowReadEngine <- mkMemreadEngineV();
-   MemreadEngineV#(TMul#(N,32), 1, K) colReadEngine <- mkMemreadEngineV();
+   MemreadEngineV#(TMul#(N,32), 2, J) rowReadEngine <- mkMemreadEngineV();
+   MemreadEngineV#(TMul#(N,32), 2, K) colReadEngine <- mkMemreadEngineV();
    Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(rowReadEngine.readServers, rowReadEngine.dataPipes));
    Vector#(K, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(colReadEngine.readServers, colReadEngine.dataPipes));
    DmaMatrixMultiplyIfc#(MMSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
