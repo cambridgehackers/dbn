@@ -37,7 +37,6 @@ import MemTypes::*;
 interface VectorSource#(numeric type dsz, type a);
    interface PipeOut#(a) pipe;
    method Action start(ObjectPointer h, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
-//   method Fmt dbg();
    method ActionValue#(Bool) finish();
 endinterface
 
@@ -60,10 +59,9 @@ module [Module] mkMemreadVectorSource#(Server#(MemengineCmd,Bool) memreadEngine,
 	     );
    Bool verbose = False;
    let asz = valueOf(asz);
-   let abytes = valueOf(abytes);
    let ashift = valueOf(ashift);
    method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
-      if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
+      if (verbose) $display("VectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
       memreadEngine.request.put(MemengineCmd { pointer: p, base: a << ashift, len: truncate(l << ashift), burstLen: (fromInteger(valueOf(BurstLen)) << ashift) });
    endmethod
    method finish = memreadEngine.response.get;
@@ -87,31 +85,29 @@ module [Module] mkDmaVectorSource(DmaVectorSource#(asz, a))
 
    interface ObjectReadClient dmaClient = memreadEngine.dmaClient;
    interface VectorSource vector;
-       method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
-	  if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
-          memreadEngine.readServers[0].request.put(MemengineCmd{pointer:p, base:a << ashift, len:truncate(l << ashift), burstLen:(fromInteger(valueOf(BurstLen)) << ashift)});
-       endmethod
+      method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
+	 if (verbose) $display("DmaVectorSource.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
+         memreadEngine.readServers[0].request.put(MemengineCmd{pointer:p, base:a << ashift, len:truncate(l << ashift), burstLen:(fromInteger(valueOf(BurstLen)) << ashift)});
+      endmethod
       method ActionValue#(Bool) finish();
 	 let b <- memreadEngine.readServers[0].response.get;
 	 return b;
       endmethod
-//      method Fmt dbg();
-//	 return memreadEngine.dbg();
-//      endmethod
-       interface PipeOut pipe;
-	  method first();
-	     return unpack(memreadEngine.dataPipes[0].first);
-	  endmethod
-	  method Action deq();
-	     if (verbose) $display("ObjectReadClient pipe.deq() data=%h", memreadEngine.dataPipes[0].first);
-	     memreadEngine.dataPipes[0].deq;
-	  endmethod
-	  method notEmpty = memreadEngine.dataPipes[0].notEmpty;
-       endinterface
+      interface PipeOut pipe;
+	 method first();
+	    return unpack(memreadEngine.dataPipes[0].first);
+	 endmethod
+	 method Action deq();
+	    if (verbose) $display("ObjectReadClient pipe.deq() data=%h", memreadEngine.dataPipes[0].first);
+	    memreadEngine.dataPipes[0].deq;
+	 endmethod
+	 method notEmpty = memreadEngine.dataPipes[0].notEmpty;
+      endinterface
    endinterface
 endmodule
 
 interface VectorSink#(numeric type dsz, type a);
+   interface PipeIn#(a) pipe;
    method Action start(ObjectPointer h, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
    method ActionValue#(Bool) finish();
 endinterface
@@ -120,10 +116,29 @@ interface DmaVectorSink#(numeric type dsz, type a);
    interface VectorSink#(dsz, a) vector;
 endinterface
 
+module [Module] mkMemwriteVectorSink#(Server#(MemengineCmd,Bool) memwriteEngine, PipeIn#(Bit#(asz)) pipeIn)(VectorSink#(asz, a))
+   provisos (Bits#(a,asz),
+	     Div#(asz,8,abytes),
+	     Log#(abytes,ashift),
+	     Mul#(abytes, 8, asz)
+	     );
+   Bool verbose = False;
+   let asz = valueOf(asz);
+   let ashift = valueOf(ashift);
+   method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
+      if (verbose) $display("VectorSink.start h=%d a=%h l=%h ashift=%d", p, a, l, ashift);
+      // this is really shitty.  I set burstLen so that testmm works, but I'm not sure if this is generally usable anymore (mdk)
+      memwriteEngine.request.put(MemengineCmd { pointer: p, base: a << ashift, len: truncate(l << ashift), burstLen: fromInteger(valueOf(abytes)) });
+   endmethod
+   method finish = memwriteEngine.response.get;
+   interface PipeIn pipe = mapPipeIn(pack, pipeIn);
+endmodule
+
 module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
    provisos (Bits#(a,asz),
 	     Div#(asz,8,abytes),
 	     Log#(abytes,ashift),
+	     Add#(1, a__, asz),
 	     Mul#(abytes,8,asz));
 
    let asz = valueOf(asz);
@@ -141,10 +156,10 @@ module [Module] mkDmaVectorSink#(PipeOut#(a) pipe_in)(DmaVectorSink#(asz, a))
 
    interface ObjectWriteClient dmaClient = memwriteEngine.dmaClient;
    interface VectorSink vector;
-       method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
-	  if (verbose) $display("DmaVectorSink.start   p=%d offset=%h l=%h", p, a, l);
-	  memwriteEngine.writeServers[0].request.put(MemengineCmd{pointer:p, base:a << ashift, len:truncate(l << ashift), burstLen:fromInteger(valueOf(BurstLen)) << ashift});
-       endmethod
+      method Action start(ObjectPointer p, Bit#(ObjectOffsetSize) a, Bit#(ObjectOffsetSize) l);
+	 if (verbose) $display("DmaVectorSink.start   p=%d offset=%h l=%h", p, a, l);
+	 memwriteEngine.writeServers[0].request.put(MemengineCmd{pointer:p, base:a << ashift, len:truncate(l << ashift), burstLen:fromInteger(valueOf(BurstLen)) << ashift});
+      endmethod
       method ActionValue#(Bool) finish();
 	 let b <- memwriteEngine.writeServers[0].response.get;
 	 return b;

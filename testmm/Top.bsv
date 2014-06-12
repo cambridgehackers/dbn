@@ -36,12 +36,6 @@ typedef 1 NumMasters;
 typedef 1 NumMasters;
 `endif
 
-typedef TMul#(TDiv#(2,NumMasters),NumMasters)  NumReadBuffers;
-typedef TMul#(TDiv#(J,NumMasters),NumMasters)  NumWriteBuffers;
-
-typedef NumReadBuffers  NumReadClients;
-typedef NumWriteBuffers NumWriteClients;
-
 module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    provisos (Add#(a__, addrWidth, 40),
 	     Add#(a__, b__, 40),
@@ -62,14 +56,8 @@ module [Module] mkPortalTop(PortalTop#(addrWidth,TMul#(32,N),Empty,NumMasters))
    MmDebugRequestWrapper mmDebugRequestWrapper <- mkMmDebugRequestWrapper(MmDebugRequestPortal,mm.mmDebugRequest);
    TimerRequestWrapper timerRequestWrapper <- mkTimerRequestWrapper(TimerRequestPortal,mm.timerRequest);
    
-   Vector#(NumReadClients,ObjectReadClient#(TMul#(32,N))) readClients = mm.readClients;
-   Vector#(NumWriteClients,ObjectWriteClient#(TMul#(32,N))) writeClients = mm.writeClients;
-
-   Reg#(Bool) once <- mkReg(False);
-   rule foobar if (!once);
-      $display("read buffers %d read clients %d write buffers %d write clients %d", valueOf(NumReadBuffers), valueOf(NumReadClients), valueOf(NumWriteBuffers), valueOf(NumWriteClients));
-      once <= True;
-   endrule
+   Vector#(2,ObjectReadClient#(TMul#(32,N))) readClients = mm.readClients;
+   Vector#(1,ObjectWriteClient#(TMul#(32,N))) writeClients = cons(mm.writeClient,nil);
 
    MemServer#(addrWidth, TMul#(32,N), NumMasters) dma <- mkMemServer(dmaIndicationProxy.ifc, readClients, writeClients);
    DmaConfigWrapper dmaConfigWrapper <- mkDmaConfigWrapper(DmaConfigPortal,dma.request);

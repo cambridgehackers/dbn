@@ -31,6 +31,7 @@ import DmaVector::*;
 import PortalMemory::*;
 import MemTypes::*;
 import MemreadEngine::*;
+import MemwriteEngine::*;
 import FloatingPoint::*;
 import Pipe::*;
 import FloatOps::*;
@@ -353,7 +354,6 @@ typedef struct {
 
 // row major layout
 interface DmaMatrixMultiplyIfc#(numeric type addrwidth, numeric type dsz);
-   interface Vector#(J, ObjectWriteClient#(dsz)) writeClients;
    method Action start(ObjectPointer pointerA, UInt#(addrwidth) numRowsA, UInt#(addrwidth) numColumnsA,
 		       ObjectPointer pointerB, UInt#(addrwidth) numRowsB, UInt#(addrwidth) numColumnsB,
 		       ObjectPointer pointerC);
@@ -375,7 +375,7 @@ typedef enum {
  */
 module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Float))) sourceA,
 				     Vector#(K, VectorSource#(dsz, Vector#(N, Float))) sourceB,
-				     function Module#(DmaVectorSink#(dsz, Vector#(N, Float))) mkSink(PipeOut#(Vector#(N, Float)) pipe_in)
+				     Vector#(J, VectorSink#(dsz, Vector#(N,Float)))    sinks
 				     )(DmaMatrixMultiplyIfc#(addrwidth, dsz))
    provisos (  Add#(N,n__,K)
 	     , Mul#(N,m__,K)
@@ -431,9 +431,10 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 fxpipes[j] = mmTiles[t].fxPipes[i];
       end
    end
-
-   Vector#(J, DmaVectorSink#(dsz, Vector#(N, Float))) sinks <- mapM(mkSink, fxpipes);
-
+   
+   function PipeIn#(a) getPipe(VectorSink#(n,a) vs) = vs.pipe;
+   zipWithM(mkConnection, fxpipes, map(getPipe, sinks));
+   
    XYRangePipeIfc#(UInt#(addrwidth)) indexpipeifc <- mkXYRangePipeOut();
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeA <- mkXYRangePipeOut();
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeB <- mkXYRangePipeOut();
@@ -500,7 +501,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 
 	 sourceA[j].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[")+fshow(jint)+fshow("].start")+fshow(startA)));
-	 sinks[j].vector.start(descriptorC.pointer, pack(extend(startC>>nshift)), fromInteger(kk/n));
+	 sinks[j].start(descriptorC.pointer, pack(extend(startC>>nshift)), fromInteger(kk/n));
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("      sinks[")+fshow(jint)+fshow("].start")+fshow(startC)));
 
       endrule
@@ -514,7 +515,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 $dumpoff();
 	 // each time we write a burst of k values via sinks
 	 //let index <- toGet(indexpipes[jj+kk+1]).get();
-	 let b <- sinks[j].vector.finish();
+	 let b <- sinks[j].finish();
 	 let c = dotprodCount-fromInteger(kk);
 	 int jint = fromInteger(j);
 	 if (verbose1) $display($format(fshow(cycles)+fshow("    finishSink c")+fshow(c)+fshow(" j=")+fshow(jint)));
@@ -602,13 +603,11 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       Vector#(T, Vector#(RowsPerTile, Bit#(TLog#(K)))) chans = map(getMmTileChans, mmTiles);
       return tuple6(pack(aNotEmpty), pack(bNotEmpty), macCount, mmtilesANotEmpty, mmtilesBNotEmpty, pack(chans));
    endmethod
-
-   interface Vector writeClients = map(getSinkWriteClient, sinks);
 endmodule
 
 interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
    interface Vector#(2, ObjectReadClient#(dmasz)) readClients;
-   interface Vector#(J, ObjectWriteClient#(dmasz)) writeClients;
+   interface ObjectWriteClient#(dmasz) writeClient;
    method Action start(ObjectPointer pointerA, UInt#(MMSize) numRowsA, UInt#(MMSize) numColumnsA,
 		       ObjectPointer pointerB, UInt#(MMSize) numRowsB, UInt#(MMSize) numColumnsB,
 		       ObjectPointer pointerC);
@@ -618,13 +617,18 @@ endinterface
 
 (* synthesize *)
 module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
+   
    MemreadEngineV#(TMul#(N,32), 2, J) rowReadEngine <- mkMemreadEngine();
    MemreadEngineV#(TMul#(N,32), 2, K) colReadEngine <- mkMemreadEngine();
+   MemwriteEngineV#(TMul#(N,32),2, J)   writeEngine <- mkMemwriteEngine();
+
    Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(rowReadEngine.readServers, rowReadEngine.dataPipes));
    Vector#(K, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(colReadEngine.readServers, colReadEngine.dataPipes));
-   DmaMatrixMultiplyIfc#(MMSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, mkDmaVectorSink);
+   Vector#(J,   VectorSink#(DmaSz, Vector#(N,Float)))      sinks <- mapM(uncurry(mkMemwriteVectorSink),   zip(writeEngine.writeServers,   writeEngine.dataPipes));
+
+   DmaMatrixMultiplyIfc#(MMSize,DmaSz) dmaMMF <- mkDmaMatrixMultiply(xvfsources, yvfsources, sinks);
    interface Vector readClients = cons(rowReadEngine.dmaClient, cons(colReadEngine.dmaClient, nil));
-   interface Vector writeClients = dmaMMF.writeClients;
+   interface writeClient = writeEngine.dmaClient;
    method start = dmaMMF.start;
    method finish = dmaMMF.finish;
    method Tuple6#(Bit#(J),Bit#(K),Bit#(32),Bit#(J),Bit#(J),Bit#(TMul#(J,TLog#(K)))) dbg();
@@ -637,7 +641,7 @@ interface Mm#(numeric type n);
    interface MmDebugRequest mmDebugRequest;
    interface TimerRequest timerRequest;
    interface Vector#(2, ObjectReadClient#(TMul#(32,N))) readClients;
-   interface Vector#(J, ObjectWriteClient#(TMul#(32,n))) writeClients;
+   interface ObjectWriteClient#(TMul#(32,n)) writeClient;
 endinterface
 
 module [Module] mkMm#(MmIndication ind, TimerIndication timerInd, MmDebugIndication mmDebugIndication)(Mm#(N))
@@ -702,6 +706,6 @@ module [Module] mkMm#(MmIndication ind, TimerIndication timerInd, MmDebugIndicat
    endinterface
 
    interface Vector readClients = dmaMMF.readClients;
-   interface Vector writeClients =  dmaMMF.writeClients;
+   interface writeClient =  dmaMMF.writeClient;
 
 endmodule
