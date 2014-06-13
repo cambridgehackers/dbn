@@ -377,9 +377,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 				     Vector#(K, VectorSource#(dsz, Vector#(N, Float))) sourceB,
 				     Vector#(J, VectorSink#(dsz, Vector#(N,Float)))    sinks
 				     )(DmaMatrixMultiplyIfc#(addrwidth, dsz))
-   provisos (  Add#(N,n__,K)
-	     , Mul#(N,m__,K)
-	     , Add#(1,o__,J)
+   provisos (  Add#(1,o__,J)
 	     , Log#(N,nshift)
 	     , FShow#(Float)
 	     , Arith#(Float)
