@@ -58,7 +58,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
 
    let n = valueOf(N);
    UInt#(TAdd#(TLog#(K),1)) repetitions = fromInteger(valueOf(K));
-   Bool verbose = False; //label==0;
+   Bool verbose = False;
 
    Reg#(Bool)      readyReg     <- mkReg(False);
    Reg#(UInt#(20)) numEltsReg   <- mkReg(0);
@@ -109,6 +109,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
    rule mulin;
       let chan = chanReg;
 
+      lastMulin[chan] <= cycles;
       begin // measure and display latency
 	 let latency = cycles-lastMulin[chan];
 	 if ((lastMulin[chan] - cycles) < 6)
@@ -118,7 +119,6 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
 	    $display("%08d label=%d mulin chan=%d latency", cycles, label, chan, latency);
 	    latencyReported[latency] <= True;
 	 end
-	 lastMulin[chan] <= cycles;
       end
 
       chanFifos[0].enq(chan);
@@ -127,7 +127,7 @@ module [Module] mkSharedDotProdServer#(UInt#(TLog#(TMul#(J,K))) label)(SharedDot
       let b <- toGet(bFunnel).get();
 
       let first <- toGet(firstPipe).get();
-      //if (label == 0) $display("%08d label=%d mulin chan=%d first=%d", cycles, label, chan, first);
+      if (verbose) $display("%08d label=%d mulin chan=%d first=%d", cycles-lastMulin[chan], label, chan, first);
       mul.request.put(tuple2(a, b));
    endrule
 
@@ -377,7 +377,9 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 				     Vector#(K, VectorSource#(dsz, Vector#(N, Float))) sourceB,
 				     Vector#(J, VectorSink#(dsz, Vector#(N,Float)))    sinks
 				     )(DmaMatrixMultiplyIfc#(addrwidth, dsz))
-   provisos (  Add#(1,o__,J)
+   provisos ( Add#(N,n__,K)
+	     , Mul#(N,m__,K)
+	     , Add#(1,o__,J)
 	     , Log#(N,nshift)
 	     , FShow#(Float)
 	     , Arith#(Float)
@@ -414,10 +416,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       cycles <= cycles+1;
    endrule
 
-   Vector#(T, MmTile) mmTiles = newVector();
-   for (Integer t = 0; t < tt; t = t+1)
-      mmTiles[t] <- mkMmTile(fromInteger(t));
-
+   Vector#(T, MmTile) mmTiles <- mapM(mkMmTile,map(fromInteger,genVector));
    Vector#(J, PipeOut#(Vector#(N,Float))) fxpipes;
    for (Integer t = 0; t < valueOf(T); t = t+1) begin
       for (Integer i = 0; i < valueof(RowsPerTile); i = i+1) begin
@@ -438,14 +437,17 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeB <- mkXYRangePipeOut();
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeC <- mkXYRangePipeOut();
 
-   Vector#(TAdd#(J,K), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) indexpipes <- mkSizedForkVector(valueOf(SourceBufferSize), indexpipeifc.pipe);
-   Vector#(J, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesA <- mkSizedForkVector(valueOf(SourceBufferSize), offsetpipeA.pipe);
-   Vector#(K, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesB <- mkSizedForkVector(valueOf(SourceBufferSize), offsetpipeB.pipe);
-   Vector#(J, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesC <- mkSizedForkVector(valueOf(SourceBufferSize), offsetpipeC.pipe);
-
+   Vector#(TAdd#(J,K), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) indexpipes <- mkSizedForkVector(4,indexpipeifc.pipe);
+   Vector#(J, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesA <- mkSizedForkVector(4,offsetpipeA.pipe);
+   Vector#(K, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesB <- mkSizedForkVector(4,offsetpipeB.pipe);
+   Vector#(J, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesC <- mkSizedForkVector(4,offsetpipeC.pipe);
+   
+   Vector#(J, Reg#(UInt#(32))) lastStartAs <- replicateM(mkReg(0));
+   Vector#(K, Reg#(UInt#(32))) lastStartBs <- replicateM(mkReg(0));
+   Vector#(K, Reg#(UInt#(32))) lastStartCs <- replicateM(mkReg(0));
+      
    Reg#(Bool) running <- mkReg(False);
    FIFOF#(Bool) doneFifo <- mkFIFOF();
-   
    
    Vector#(J, Reg#(UInt#(addrwidth))) startAOffset <- replicateM(mkReg(0));
    Vector#(K, Reg#(UInt#(addrwidth))) startBOffset <- replicateM(mkReg(0));
@@ -461,8 +463,11 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
 	 let col = tpl_2(index)+fromInteger(k);
 
 	 let startB = startBBase + startBOffset[k];
+	 
+	 lastStartBs[k] <= cycles;
+	 let interval = cycles-lastStartBs[k];
 
-	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    startB index=")+fshow(tuple2(row,col))
+	 if (timing || verbose) $display($format(fshow(interval)+fshow("    startB index=")+fshow(tuple2(row,col))
 	    +fshow(" startB=")+fshow(startB)
 	    +fshow(" k=")+fshow(kint)));
 
@@ -474,38 +479,47 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       rule finishSourceB;
 	 UInt#(TLog#(K)) in = fromInteger(k);
 	 int kint = fromInteger(k);
-	 if (timing || verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(kint)+fshow("].finish")));
+	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceB[")+fshow(kint)+fshow("].finish")));
 	 let b <- sourceB[k].finish();
       endrule
    end
    for (Integer j = 0; j < jj; j = j + 1) begin
 
       int jint = fromInteger(j);
-      rule startSourceAandSink;
+      rule startSourceA;
 	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[j+kk]).get();
 
 	 let row = tpl_1(index)+fromInteger(j);
 	 let col = tpl_2(index);
 
 	 match { .startABase, .unusedA } <- toGet(offsetpipesA[j]).get();
-	 match { .startCBase, .offsetC } <- toGet(offsetpipesC[j]).get();
 	 let startA = startABase + startAOffset[j];
-	 let startC = startCBase + startCOffset[j] + offsetC;
 
-	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    startA index=")+fshow(tuple2(row,col))
-	    +fshow(" startA=")+fshow(startA)
-	    +fshow(" startC=")+fshow(startC)
-	    +fshow(" j=")+fshow(jint)));
+	 lastStartAs[j] <= cycles;
+	 let interval = cycles-lastStartAs[j];
 
+	 if (timing || verbose) $display($format(fshow(interval)+fshow("    startA index=")+fshow(tuple2(row,col))+fshow(" startA=")+fshow(startA)));
+	 
 	 sourceA[j].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[")+fshow(jint)+fshow("].start")+fshow(startA)));
+
+      endrule
+      
+      rule startSink;
+	 match { .startCBase, .offsetC } <- toGet(offsetpipesC[j]).get();
+	 let startC = startCBase + startCOffset[j] + offsetC;
+
+	 lastStartCs[j] <= cycles;
+	 let interval = cycles-lastStartCs[j];
+
+	 if (timing || verbose) $display($format(fshow(interval)+fshow("    startC=")+fshow(startC)));
+	 
 	 sinks[j].start(descriptorC.pointer, pack(extend(startC>>nshift)), fromInteger(kk/n));
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("      sinks[")+fshow(jint)+fshow("].start")+fshow(startC)));
-
       endrule
 
       rule finishSourceA;
-	 if (timing || verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[")+fshow(jint)+fshow("].finish ")));
+	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[")+fshow(jint)+fshow("].finish ")));
 	 let b <- sourceA[j].finish();
       endrule
 
