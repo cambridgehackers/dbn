@@ -202,5 +202,5 @@ int main(int argc, const char **argv)
   bool eq = std::equal(m3.begin<float>(), m3.end<float>(), pm3.begin<float>());
   fprintf(stderr, "eq=%d\n", eq);
   //device->finish();
-  exit(0);
+  exit(!eq);
 }

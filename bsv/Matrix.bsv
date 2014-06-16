@@ -219,11 +219,8 @@ module [Module] mkMmTile#(UInt#(TLog#(T)) tile)(MmTile);
    Vector#(RowsPerTile,  FIFOF#(Float))   bFifos <- replicateM(mkFIFOF);
    Vector#(RowsPerTile,  PipeOut#(Float)) bPipes = map(toPipeOut, bFifos);
 
-   function Module#(SharedDotProdServer#(K)) mkFxDotProd(Integer i);
-      return mkSharedDotProdServer(fromInteger(i));
-   endfunction
    function Vector#(k,PipeOut#(Float)) getDotProdServerPipes(SharedDotProdServer#(k) s); return s.pipes; endfunction
-   Vector#(RowsPerTile, SharedDotProdServer#(K)) fxdotprods <- genWithM(mkFxDotProd);
+   Vector#(RowsPerTile, SharedDotProdServer#(K)) fxdotprods <- mapM(mkSharedDotProdServer, map(fromInteger,genVector));
    Vector#(RowsPerTile, Vector#(K, PipeOut#(Float))) fxpipes = map(getDotProdServerPipes, fxdotprods);
 `define USE_MIMO_DFIFOS // this version is faster
 `ifndef USE_MIMO_DFIFOS
@@ -421,10 +418,8 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    for (Integer t = 0; t < valueOf(T); t = t+1) begin
       for (Integer i = 0; i < valueof(RowsPerTile); i = i+1) begin
 	 let j = t*valueOf(RowsPerTile) + i;
-
 	 mkConnection(toGet(aPipes[j]), mmTiles[t].aInputs[i]);
 	 mkConnection(toGet(bFunnelPipes[j]), mmTiles[t].bInputs[i]);
-
 	 fxpipes[j] = mmTiles[t].fxPipes[i];
       end
    end
@@ -437,10 +432,10 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeB <- mkXYRangePipeOut();
    XYRangePipeIfc#(UInt#(addrwidth)) offsetpipeC <- mkXYRangePipeOut();
 
-   Vector#(TAdd#(J,K), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) indexpipes <- mkSizedForkVector(4,indexpipeifc.pipe);
-   Vector#(J, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesA <- mkSizedForkVector(4,offsetpipeA.pipe);
-   Vector#(K, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesB <- mkSizedForkVector(4,offsetpipeB.pipe);
-   Vector#(J, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesC <- mkSizedForkVector(4,offsetpipeC.pipe);
+   Vector#(TAdd#(J,K), PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth)))) indexpipes <- mkForkVector(indexpipeifc.pipe);
+   Vector#(J, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesA <- mkForkVector(offsetpipeA.pipe);
+   Vector#(K, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesB <- mkForkVector(offsetpipeB.pipe);
+   Vector#(J, PipeOut#(Tuple2#(UInt#(addrwidth),UInt#(addrwidth))))        offsetpipesC <- mkForkVector(offsetpipeC.pipe);
    
    Vector#(J, Reg#(UInt#(32))) lastStartAs <- replicateM(mkReg(0));
    Vector#(K, Reg#(UInt#(32))) lastStartBs <- replicateM(mkReg(0));
@@ -615,7 +610,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
       Vector#(T, Vector#(RowsPerTile, Bit#(TLog#(K)))) chans = map(getMmTileChans, mmTiles);
       return tuple6(pack(aNotEmpty), pack(bNotEmpty), macCount, mmtilesANotEmpty, mmtilesBNotEmpty, pack(chans));
    endmethod
-endmodule
+endmodule : mkDmaMatrixMultiply
 
 interface DramMatrixMultiply#(numeric type n, numeric type dmasz);
    interface Vector#(2, ObjectReadClient#(dmasz)) readClients;
