@@ -395,7 +395,7 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    let nshift = valueOf(nshift);
    Bool verbose = False;
    Bool verbose1 = False;
-   Bool timing = False;
+   Bool timing = True;
 
    Reg#(UInt#(32)) cycles <- mkReg(0);
    Reg#(Bool) doneReg <- mkReg(False);
@@ -481,36 +481,29 @@ module [Module] mkDmaMatrixMultiply#(Vector#(J, VectorSource#(dsz, Vector#(N, Fl
    for (Integer j = 0; j < jj; j = j + 1) begin
 
       int jint = fromInteger(j);
-      rule startSourceA;
-	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[j+kk]).get();
 
+      rule startSourceAndSink;
+	 Tuple2#(UInt#(addrwidth),UInt#(addrwidth)) index <- toGet(indexpipes[j+kk]).get();
+	 
 	 let row = tpl_1(index)+fromInteger(j);
 	 let col = tpl_2(index);
-
+	 
 	 match { .startABase, .unusedA } <- toGet(offsetpipesA[j]).get();
+	 match { .startCBase, .offsetC } <- toGet(offsetpipesC[j]).get();
 	 let startA = startABase + startAOffset[j];
-
-	 lastStartAs[j] <= cycles;
-	 let interval = cycles-lastStartAs[j];
-
-	 if (timing || verbose) $display($format(fshow(interval)+fshow("    startA index=")+fshow(tuple2(row,col))+fshow(" startA=")+fshow(startA)));
+	 let startC = startCBase + startCOffset[j] + offsetC;
+	 
+	 int jint = fromInteger(j);
+	 if (timing || verbose) $display($format(fshow(cycles)+fshow("    start A index=")+fshow(tuple2(row,col))
+						 +fshow(" startA=")+fshow(startA)
+						 +fshow(" startC=")+fshow(startC)
+						 +fshow(" j=")+fshow(jint)));
 	 
 	 sourceA[j].start(descriptorA.pointer, pack(extend(startA>>nshift)), pack(extend(descriptorA.numColumns>>nshift)));
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("    sourceA[")+fshow(jint)+fshow("].start")+fshow(startA)));
-
-      endrule
-      
-      rule startSink;
-	 match { .startCBase, .offsetC } <- toGet(offsetpipesC[j]).get();
-	 let startC = startCBase + startCOffset[j] + offsetC;
-
-	 lastStartCs[j] <= cycles;
-	 let interval = cycles-lastStartCs[j];
-
-	 if (timing || verbose) $display($format(fshow(interval)+fshow("    startC=")+fshow(startC)));
-	 
 	 sinks[j].start(descriptorC.pointer, pack(extend(startC>>nshift)), fromInteger(kk/n));
 	 if (verbose || verbose1) $display($format(fshow(cycles)+fshow("      sinks[")+fshow(jint)+fshow("].start")+fshow(startC)));
+	 
       endrule
 
       rule finishSourceA;
@@ -625,9 +618,9 @@ endinterface
 (* synthesize *)
 module [Module] mkDramMatrixMultiply(DramMatrixMultiply#(N,TMul#(N,32)));
    
-   MemreadEngineV#(TMul#(N,32), 2, J) rowReadEngine <- mkMemreadEngine();
-   MemreadEngineV#(TMul#(N,32), 2, K) colReadEngine <- mkMemreadEngine();
-   MemwriteEngineV#(TMul#(N,32),2, J)   writeEngine <- mkMemwriteEngine();
+   MemreadEngineV#(TMul#(N,32), 1, J) rowReadEngine <- mkMemreadEngine();
+   MemreadEngineV#(TMul#(N,32), 1, K) colReadEngine <- mkMemreadEngine();
+   MemwriteEngineV#(TMul#(N,32),1, J)   writeEngine <- mkMemwriteEngine();
 
    Vector#(J, VectorSource#(DmaSz, Vector#(N,Float))) xvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(rowReadEngine.readServers, rowReadEngine.dataPipes));
    Vector#(K, VectorSource#(DmaSz, Vector#(N,Float))) yvfsources <- mapM(uncurry(mkMemreadVectorSource), zip(colReadEngine.readServers, colReadEngine.dataPipes));
@@ -716,3 +709,4 @@ module [Module] mkMm#(MmIndication ind, TimerIndication timerInd, MmDebugIndicat
    interface writeClient =  dmaMMF.writeClient;
 
 endmodule
+

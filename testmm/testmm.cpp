@@ -126,7 +126,7 @@ int main(int argc, const char **argv)
 
 #define LARGE_MAT
 #ifdef LARGE_MAT
-  int matrixSize = 64;
+  int matrixSize = 32;
   if (argc > 1)
     matrixSize = strtoul(argv[1], 0, 0);
   cv::Mat m1 = (cv::Mat_<float>(matrixSize,matrixSize) <<
@@ -200,6 +200,7 @@ int main(int argc, const char **argv)
     dumpMat<float>("m1 * m2", "%5.1f", m3);
   }
   bool eq = std::equal(m3.begin<float>(), m3.end<float>(), pm3.begin<float>());
+  dumpMat<float>("diff", "%5.1f", pm3);
   fprintf(stderr, "eq=%d\n", eq);
   //device->finish();
   exit(!eq);
